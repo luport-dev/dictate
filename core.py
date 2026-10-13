@@ -187,6 +187,31 @@ def notify(msg, urgency="normal", timeout_ms=1500):
         pass
 
 
+def _paste_wayland(text):
+    """Put text on the clipboard and press Ctrl+V through ydotool. ydotool
+    'type' sends US-QWERTY scancodes, which garbles umlauts, ? and case on a
+    German layout; pasting is layout-independent. Restores the old clipboard.
+    Returns False if it could not paste, so the caller can fall back to typing."""
+    import time
+    try:
+        old = subprocess.run(["wl-paste", "--no-newline"], capture_output=True, timeout=2)
+        subprocess.run(["wl-copy"], input=text.encode(), check=True, timeout=2)
+        # 29 = left ctrl, 47 = v
+        r = subprocess.run(["ydotool", "key", "29:1", "47:1", "47:0", "29:0"],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            log.error("ydotool paste key failed: %s", r.stderr.strip())
+            return False
+        time.sleep(0.3)  # let the target app read the clipboard first
+        if old.returncode == 0:
+            subprocess.run(["wl-copy"], input=old.stdout, timeout=2)
+        else:
+            subprocess.run(["wl-copy", "--clear"], timeout=2)
+        return True
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+
+
 def type_text(text):
     if not text:
         return
@@ -203,6 +228,8 @@ def type_text(text):
         keyboard.Controller().type(text)
         return
     on_x11 = os.environ.get("XDG_SESSION_TYPE") == "x11"
+    if not on_x11 and _paste_wayland(text):
+        return
     tools = ["xdotool", "ydotool"] if on_x11 else ["ydotool", "xdotool"]
     for tool in tools:
         try:
@@ -212,8 +239,11 @@ def type_text(text):
                 r = subprocess.run(
                     ["ydotool", "type", "--key-delay", "0", "--", text],
                     check=False,
-                    stderr=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
                 )
+                if r.returncode != 0 and r.stderr.strip():
+                    log.error("ydotool: %s", r.stderr.strip())
             if r.returncode != 0:
                 log.error("%s exited with %s — text not typed", tool, r.returncode)
                 notify(f"Typing failed ({tool} exit {r.returncode})", urgency="critical", timeout_ms=5000)

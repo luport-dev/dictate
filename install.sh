@@ -15,6 +15,9 @@ sudo apt-get update -qq
 # libportaudio2: runtime library for the sounddevice wheel (missing on a fresh Ubuntu desktop)
 sudo apt-get install -y \
     xdotool ydotool libnotify-bin python3-pip libxcb-cursor0 python3-evdev libportaudio2
+# ydotool >= 1.0 needs its ydotoold daemon (0.1.x ran standalone); without it
+# every type fails with "failed to connect socket ... .ydotool_socket".
+systemctl --user enable --now ydotool.service 2>/dev/null || true
 
 echo
 echo "[2/4] Installing Python packages..."
@@ -41,7 +44,9 @@ fi
 
 echo
 echo "[4/4] Creating desktop entry..."
-mkdir -p ~/.local/share/applications
+mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps
+cp "${SCRIPT_DIR}/icon.png" ~/.local/share/icons/hicolor/256x256/apps/dictate.png
+gtk-update-icon-cache -q -t ~/.local/share/icons/hicolor 2>/dev/null || true
 cat > ~/.local/share/applications/dictate.desktop <<EOF
 [Desktop Entry]
 Type=Application
@@ -49,7 +54,7 @@ Name=Dictate
 GenericName=Voice dictation
 Comment=Voice dictation to keyboard (Groq / OpenAI Whisper)
 Exec=python3 ${SCRIPT_DIR}/gui.py
-Icon=audio-input-microphone
+Icon=dictate
 Terminal=false
 Categories=Utility;Audio;Accessibility;
 StartupNotify=false

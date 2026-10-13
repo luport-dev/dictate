@@ -4,6 +4,7 @@ import fcntl
 import sys
 import threading
 import time
+from pathlib import Path
 
 import numpy as np
 from PyQt6.QtCore import Qt, QObject, QTimer, pyqtSignal
@@ -41,6 +42,7 @@ class Bridge(QObject):
     other_press = pyqtSignal()
     transcribed = pyqtSignal(str)
     error = pyqtSignal(str)
+    typing_done = pyqtSignal()
 
 
 class SettingsDialog(QDialog):
@@ -308,22 +310,52 @@ class SettingsDialog(QDialog):
         }
 
 
-def make_mic_icon(color="#2b2b2b"):
-    pix = QPixmap(64, 64)
+# Equalizer tray icon, same look and motion as the voice-ink project
+# (src/voice_ink/tray_icon.py): four bars of up to five gradient segments.
+_GRADIENTS = {
+    "idle":         [(0,80,20),(0,130,40),(0,185,70),(0,220,140),(0,245,210)],
+    "recording":    [(120,0,0),(170,0,0),(220,20,20),(255,60,40),(255,120,80)],
+    "transcribing": [(255,100,0),(255,150,0),(255,190,0),(255,225,0),(255,250,50)],
+    "typing":       [(0,90,140),(0,130,180),(0,175,220),(40,210,245),(80,240,255)],
+}
+IDLE_SEGMENTS = (3, 5, 4, 3)
+SEGMENT_SLOTS = 5
+
+
+class BarMotion:
+    """Each bar travels one row per frame and turns around at the limits."""
+
+    def __init__(self, count):
+        import random
+        self._heights = [random.randint(1, SEGMENT_SLOTS) for _ in range(count)]
+        self._dirs = [random.choice((-1, 1)) for _ in range(count)]
+
+    def step(self):
+        for i, h in enumerate(self._heights):
+            nxt = h + self._dirs[i]
+            if not 1 <= nxt <= SEGMENT_SLOTS:
+                self._dirs[i] = -self._dirs[i]
+                nxt = h + self._dirs[i]
+            self._heights[i] = nxt
+        return tuple(self._heights)
+
+
+def make_state_icon(state, segments=IDLE_SEGMENTS):
+    size, bar_gap, seg_gap = 64, 11, 2
+    grad = _GRADIENTS[state]
+    bar_w = (size - (len(segments) - 1) * bar_gap) // len(segments)
+    seg_h = (size - (SEGMENT_SLOTS - 1) * seg_gap) // SEGMENT_SLOTS
+    pix = QPixmap(size, size)
     pix.fill(Qt.GlobalColor.transparent)
     p = QPainter(pix)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setBrush(QColor(color))
     p.setPen(Qt.PenStyle.NoPen)
-    p.drawRoundedRect(22, 8, 20, 32, 10, 10)
-    p.setPen(QColor(color))
-    p.setBrush(Qt.GlobalColor.transparent)
-    pen = p.pen()
-    pen.setWidth(4)
-    p.setPen(pen)
-    p.drawArc(16, 28, 32, 24, 0, -180 * 16)
-    p.drawLine(32, 50, 32, 58)
-    p.drawLine(22, 58, 42, 58)
+    x = 0
+    for height in segments:
+        for i in range(height):
+            p.setBrush(QColor(*grad[i]))
+            bottom = size - i * (seg_h + seg_gap)
+            p.drawRoundedRect(x, bottom - seg_h, bar_w, seg_h, 1, 1)
+        x += bar_w + bar_gap
     p.end()
     return QIcon(pix)
 
@@ -332,6 +364,7 @@ STATUS_STYLES = {
     "ready":        ("#f3f3f3", "#222"),
     "recording":    ("#fde2e2", "#a00000"),
     "transcribing": ("#fff3cc", "#8a6d00"),
+    "typing":       ("#dff3e0", "#1b5e20"),
     "error":        ("#ffd6d6", "#9a0000"),
 }
 
@@ -341,7 +374,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Dictate")
         self.resize(500, 380)
-        self.setWindowIcon(make_mic_icon())
+        self.setWindowIcon(QIcon(str(Path(__file__).with_name("icon.png"))))
 
         self.cfg = core.load_config()
         self.recorder = core.Recorder()
@@ -397,7 +430,7 @@ class MainWindow(QMainWindow):
 
         self.tray = None
         if QSystemTrayIcon.isSystemTrayAvailable():
-            self.tray = QSystemTrayIcon(make_mic_icon(), self)
+            self.tray = QSystemTrayIcon(make_state_icon("idle"), self)
             self.tray.setToolTip("Dictate")
             menu = QMenu()
             a_show = QAction("Show window", self)
@@ -408,8 +441,15 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             menu.addAction(a_quit)
             self.tray.setContextMenu(menu)
-            self.tray.activated.connect(self.on_tray)
             self.tray.show()
+
+        self._idle_icon = make_state_icon("idle")
+        self._motion = None
+        self._anim_state = None
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setInterval(167)  # 6 fps like voice-ink
+        self._anim_timer.timeout.connect(self._anim_tick)
+        self.bridge.typing_done.connect(lambda: self.set_status("ready", "Ready"))
 
         self.set_status("ready", "Ready")
         self.update_info()
@@ -612,9 +652,16 @@ class MainWindow(QMainWindow):
 
     def on_transcribed(self, text):
         if text:
-            threading.Thread(target=core.type_text, args=(text,), daemon=True).start()
+            def _type():
+                try:
+                    core.type_text(text)
+                finally:
+                    self.bridge.typing_done.emit()
+            self.set_status("typing", "Typing...")
+            threading.Thread(target=_type, daemon=True).start()
             self.last.setPlainText(text)
-        self.set_status("ready", "Ready")
+        else:
+            self.set_status("ready", "Ready")
 
     def on_error(self, msg):
         self.set_status("error", f"Error: {msg[:80]}")
@@ -631,13 +678,18 @@ class MainWindow(QMainWindow):
         )
         if self.tray:
             self.tray.setToolTip(f"Dictate — {msg}")
-
-    def on_tray(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            if self.isVisible() and not self.isMinimized():
-                self.hide()
+            self._anim_state = state if state in ("recording", "transcribing", "typing") else None
+            self._motion = BarMotion(len(IDLE_SEGMENTS))
+            if self._anim_state:
+                self._anim_tick()
+                self._anim_timer.start()
             else:
-                self.show_window()
+                self._anim_timer.stop()
+                self.tray.setIcon(self._idle_icon)
+
+    def _anim_tick(self):
+        if self._anim_state:
+            self.tray.setIcon(make_state_icon(self._anim_state, self._motion.step()))
 
     def show_window(self):
         self.showNormal()
@@ -645,7 +697,13 @@ class MainWindow(QMainWindow):
         self.activateWindow()
 
     def closeEvent(self, event):
-        QApplication.quit()
+        # Pure tray app: closing the window only hides it; "Quit" in the tray
+        # menu is the way to exit. Without a tray there is no way back, so quit.
+        if self.tray:
+            event.ignore()
+            self.hide()
+        else:
+            QApplication.quit()
 
 
 _LOCK_FD = None
@@ -677,10 +735,12 @@ def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     app = QApplication(sys.argv)
     app.setApplicationName("Dictate")
+    app.setDesktopFileName("dictate")
     has_tray = QSystemTrayIcon.isSystemTrayAvailable()
     app.setQuitOnLastWindowClosed(not has_tray)
     win = MainWindow()
-    win.show()
+    if not has_tray:
+        win.show()
     sys.exit(app.exec())
 
 
