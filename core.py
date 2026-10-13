@@ -67,7 +67,71 @@ DEFAULT_CONFIG = {
     "key":                   "f9",
     "threshold":             0.0,
     "local_stt_num_threads": 4,    # sherpa-onnx CPU thread count
+    "input_device":          "",   # microphone name; "" = system default
 }
+
+
+def _pipewire_descriptions():
+    """node.name -> human-readable description of PipeWire's audio sources."""
+    try:
+        out = subprocess.run(["pw-dump"], capture_output=True, text=True, timeout=3).stdout
+        nodes = json.loads(out)
+    except Exception:
+        return {}
+    descs = {}
+    for o in nodes:
+        p = (o.get("info") or {}).get("props") or {}
+        if p.get("media.class") == "Audio/Source" and p.get("node.name"):
+            descs[p["node.name"]] = " ".join((p.get("node.description") or "").split())
+    return descs
+
+
+def friendly_device_name(name, descs=None):
+    """Readable label for a PortAudio/PipeWire source name."""
+    desc = (descs if descs is not None else _pipewire_descriptions()).get(name)
+    if desc:
+        return desc
+    label = name.removeprefix("alsa_input.").split(".")[0]
+    for prefix in ("usb-", "pci-"):
+        label = label.removeprefix(prefix)
+    return label.replace("_", " ").replace("-", " ").strip()
+
+
+def list_input_devices():
+    """(label, name) of the microphones PipeWire offers (via PortAudio),
+    without the raw ALSA hw:* entries that bypass PipeWire and clash with it."""
+    try:
+        devs = sd.query_devices()
+    except Exception:
+        return []
+    descs = _pipewire_descriptions()
+    return [(friendly_device_name(d["name"], descs), d["name"]) for d in devs
+            if d["max_input_channels"] > 0 and d["name"].startswith("alsa_input.")]
+
+
+def _resolve_device(name):
+    """PortAudio index for a configured microphone name, or None for the
+    system default (also when the chosen mic is currently unplugged)."""
+    if not name:
+        return None
+    for i, d in enumerate(sd.query_devices()):
+        if d["max_input_channels"] > 0 and d["name"] == name:
+            return i
+    log.warning("configured microphone %r not found, using the system default", name)
+    return None
+
+
+def mic_available(name=""):
+    """Open the microphone briefly; True iff it delivers audio frames."""
+    got = []
+    try:
+        with sd.InputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="int16",
+                            device=_resolve_device(name),
+                            callback=lambda indata, n, t, s: got.append(1)):
+            sd.sleep(400)
+    except Exception:
+        return False
+    return bool(got)
 
 
 def model_ready():
@@ -184,6 +248,7 @@ class Recorder:
     def __init__(self):
         self._take = None
         self._stale = False
+        self.device = ""   # microphone name from the config; "" = default
         self.lock = threading.Lock()
 
     def mark_stale(self):
@@ -191,6 +256,13 @@ class Recorder:
         device list, so after a USB/PipeWire device change it keeps opening a
         dead device until it is re-initialised; do that before the next take."""
         self._stale = True
+
+    def reinit_if_idle(self):
+        """Re-initialise PortAudio now if nothing is recording (used by the
+        GUI's background mic check, off the GUI thread)."""
+        with self.lock:
+            if self._take is None and self._stale:
+                self._reinit_audio()
 
     def _reinit_audio(self):
         self._stale = False
@@ -220,6 +292,7 @@ class Recorder:
                 samplerate=SAMPLE_RATE,
                 channels=CHANNELS,
                 dtype="int16",
+                device=_resolve_device(self.device),
                 callback=callback,
             )
             stream.start()

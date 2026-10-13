@@ -43,6 +43,8 @@ class Bridge(QObject):
     transcribed = pyqtSignal(str)
     error = pyqtSignal(str)
     typing_done = pyqtSignal()
+    mic_error = pyqtSignal(str)
+    mic_checked = pyqtSignal(bool)
 
 
 class SettingsDialog(QDialog):
@@ -53,9 +55,9 @@ class SettingsDialog(QDialog):
     def __init__(self, cfg, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Dictate — Settings")
-        self.setMinimumWidth(460)
         self.cfg = dict(cfg)
 
+        self.resize(550, 10)   # about 550 px wide; height follows the content
         self.form = QFormLayout()
 
         self.mode_box = QComboBox()
@@ -76,6 +78,7 @@ class SettingsDialog(QDialog):
         import os as _os
         cpu_max = max(1, _os.cpu_count() or 1)
         self.local_status_label = QLabel()
+        self.local_status_label.setWordWrap(True)
         self.form.addRow("Local model:", self.local_status_label)
         self.local_download_btn = QPushButton()
         self.local_download_btn.clicked.connect(self.on_download_model)
@@ -88,6 +91,20 @@ class SettingsDialog(QDialog):
             "this system; more brings little. Changing this rebuilds the recognizer."
         )
         self.form.addRow("CPU threads:", self.local_threads_box)
+
+        self.mic_box = QComboBox()
+        self.mic_box.addItem("System default", "")
+        for label, name in core.list_input_devices():
+            self.mic_box.addItem(label, name)
+        saved = self.cfg.get("input_device", "")
+        if saved and self.mic_box.findData(saved) < 0:
+            self.mic_box.addItem(f"{core.friendly_device_name(saved)} (not connected)", saved)
+        self.mic_box.setCurrentIndex(max(self.mic_box.findData(saved), 0))
+        # Long device names must not stretch the dialog; elide them instead.
+        self.mic_box.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.mic_box.setMinimumContentsLength(20)
+        self.form.addRow("Microphone:", self.mic_box)
 
         self.threshold_box = QDoubleSpinBox()
         self.threshold_box.setRange(0.0, 5.0)
@@ -114,6 +131,7 @@ class SettingsDialog(QDialog):
 
         self.hint = QLabel()
         self.hint.setOpenExternalLinks(True)
+        self.hint.setWordWrap(True)
         self.hint.setStyleSheet("color: #777; padding: 6px 0;")
         layout.addWidget(self.hint)
 
@@ -174,6 +192,7 @@ class SettingsDialog(QDialog):
             "key":                   self.key_box.currentData(),
             "threshold":             float(self.threshold_box.value()),
             "local_stt_num_threads": int(self.local_threads_box.value()),
+            "input_device":          self.mic_box.currentData(),
         }
 
 
@@ -317,6 +336,9 @@ class MainWindow(QMainWindow):
         self._anim_timer.setInterval(167)  # 6 fps like voice-ink
         self._anim_timer.timeout.connect(self._anim_tick)
         self.bridge.typing_done.connect(lambda: self.set_status("ready", "Ready"))
+        self.bridge.mic_error.connect(self.on_mic_error)
+        self.bridge.mic_checked.connect(self.on_mic_checked)
+        self._mic_watch = False
 
         self.set_status("ready", "Ready")
         self.update_info()
@@ -456,11 +478,12 @@ class MainWindow(QMainWindow):
         if not core.model_ready():
             self.set_status("error", "Model not installed — open Settings")
             return False
+        self.recorder.device = self.cfg.get("input_device", "")
         try:
             self.recorder.start()
         except Exception as e:
             core.log.exception("could not open the microphone")
-            self.on_error(f"Microphone: {e}")
+            self.on_mic_error(f"Microphone not available: {e}")
             return False
         self.set_status("recording", "Recording...")
         return True
@@ -490,7 +513,7 @@ class MainWindow(QMainWindow):
         if audio is None:
             core.log.warning("no audio captured (mic delivered no frames)")
             self.recorder.mark_stale()
-            self.bridge.error.emit("No audio captured — check the microphone")
+            self.bridge.mic_error.emit("Microphone not available — no audio captured")
             return
         secs = len(audio) / core.SAMPLE_RATE
         peak = int(np.abs(audio).max())
@@ -510,7 +533,10 @@ class MainWindow(QMainWindow):
                 self.recorder.mark_stale()
             if peak >= 300:
                 core.keep_failed_audio(audio)
-            self.bridge.error.emit(f"Nothing transcribed ({secs:.0f}s) — {why}")
+            if peak < 300:
+                self.bridge.mic_error.emit(f"Microphone not available — {secs:.0f}s of silence")
+            else:
+                self.bridge.error.emit(f"Nothing transcribed ({secs:.0f}s) — {why}")
             return
         self.bridge.transcribed.emit(text)
 
@@ -526,6 +552,37 @@ class MainWindow(QMainWindow):
             self.last.setPlainText(text)
         else:
             self.set_status("ready", "Ready")
+
+    def on_mic_error(self, msg):
+        """A dead or vanished microphone (e.g. a USB hub that dropped out):
+        report it, then poll until it delivers audio again."""
+        self.on_error(msg)
+        if not self._mic_watch:
+            self._mic_watch = True
+            self._mic_tries = 0
+            QTimer.singleShot(3000, self._check_mic)
+
+    def _check_mic(self):
+        self._mic_tries += 1
+        self.recorder.mark_stale()
+        dev = self.cfg.get("input_device", "")
+
+        def work():
+            self.recorder.reinit_if_idle()
+            self.bridge.mic_checked.emit(core.mic_available(dev))
+        threading.Thread(target=work, daemon=True).start()
+
+    def on_mic_checked(self, ok):
+        if ok:
+            self._mic_watch = False
+            core.log.info("microphone is available again")
+            if not self.recording_active:
+                self.set_status("ready", "Ready")
+            threading.Thread(target=core.notify, args=("Microphone is back", "low", 2500), daemon=True).start()
+        elif self._mic_tries < 100:   # ~5 minutes
+            QTimer.singleShot(3000, self._check_mic)
+        else:
+            self._mic_watch = False
 
     def on_error(self, msg):
         self.set_status("error", f"Error: {msg[:80]}")
