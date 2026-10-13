@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dictate GUI — PyQt6 tray app for voice dictation via Groq Whisper."""
+"""Dictate GUI — PyQt6 tray app for offline voice dictation (Parakeet)."""
 import fcntl
 import sys
 import threading
@@ -58,47 +58,6 @@ class SettingsDialog(QDialog):
 
         self.form = QFormLayout()
 
-        # --- Provider selector ---
-        self.provider_box = QComboBox()
-        for pid, pdef in core.PROVIDERS.items():
-            self.provider_box.addItem(pdef["label"], pid)
-        i = self.provider_box.findData(self.cfg.get("provider", core.DEFAULT_PROVIDER))
-        self.provider_box.setCurrentIndex(max(i, 0))
-        self.provider_box.currentIndexChanged.connect(self.on_provider_changed)
-        self.form.addRow("Provider:", self.provider_box)
-
-        # --- API key row (hidden when a local provider is selected) ---
-        self.api_key_edit = QLineEdit()
-        self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        show_btn = QPushButton("show")
-        show_btn.setCheckable(True)
-        show_btn.setMaximumWidth(60)
-        show_btn.toggled.connect(
-            lambda on: self.api_key_edit.setEchoMode(
-                QLineEdit.EchoMode.Normal if on else QLineEdit.EchoMode.Password
-            )
-        )
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(self.api_key_edit)
-        row.addWidget(show_btn)
-        self.api_key_wrap = QWidget()
-        self.api_key_wrap.setLayout(row)
-        self.api_key_label = QLabel()
-        self.form.addRow(self.api_key_label, self.api_key_wrap)
-
-        # --- Yorik URL row (shown only for the Yorik provider) ---
-        self.yorik_url_edit = QLineEdit(self.cfg.get("yorik_url", core.DEFAULT_CONFIG["yorik_url"]))
-        self.yorik_url_edit.setPlaceholderText("http://yorik.local:8000")
-        self.form.addRow("Yorik URL:", self.yorik_url_edit)
-
-        # Per-provider key cache — only providers that actually take a key.
-        self._keys = {
-            pid: self.cfg.get(pdef["key_field"], "")
-            for pid, pdef in core.PROVIDERS.items()
-            if pdef.get("key_field")
-        }
-
         self.mode_box = QComboBox()
         self.mode_box.addItem("Push-to-talk (hold key)", "ptt")
         self.mode_box.addItem("Toggle (tap to start, tap to stop)", "toggle")
@@ -113,10 +72,7 @@ class SettingsDialog(QDialog):
         self.key_box.setCurrentIndex(max(i, 0))
         self.form.addRow("Hotkey:", self.key_box)
 
-        self.model_box = QComboBox()
-        self.form.addRow("Model:", self.model_box)
-
-        # --- Local-STT panel (shown only when a local provider is selected) ---
+        # --- Local model ---
         import os as _os
         cpu_max = max(1, _os.cpu_count() or 1)
         self.local_status_label = QLabel()
@@ -147,10 +103,6 @@ class SettingsDialog(QDialog):
         )
         self.form.addRow("Min hold to send:", self.threshold_box)
 
-        self.test_btn = QPushButton("Test API key")
-        self.test_btn.clicked.connect(self.on_test)
-        self.form.addRow("", self.test_btn)
-
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
@@ -167,59 +119,15 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(buttons)
 
-        # Wire the download-worker bridge, then sync UI to current provider.
+        # Wire the download-worker bridge, then show the model state.
         self._dl_status.connect(self.local_status_label.setText)
         self._dl_done.connect(self._on_download_done)
-        self.refresh_model_box(self.cfg.get("model", core.DEFAULT_MODEL))
-        self.on_provider_changed()
-
-    def on_provider_changed(self):
-        # Persist edits to the previously-shown provider's key (if any) before
-        # swapping the display to the newly selected provider.
-        prev = getattr(self, "_shown_provider", None)
-        if prev is not None and prev in self._keys:
-            self._keys[prev] = self.api_key_edit.text().strip()
-
-        pid = self.provider_box.currentData()
-        pdef = core.PROVIDERS[pid]
-        self._shown_provider = pid
-        is_local = pdef.get("is_local", False)
-
-        # HTTP-provider widgets
-        if not is_local:
-            self.api_key_label.setText(f"{pdef['label']} API key:")
-            self.api_key_edit.setText(self._keys.get(pid, ""))
-            self.api_key_edit.setPlaceholderText(f"{pdef['key_prefix']}...")
-
-        # Toggle row visibility. QFormLayout.setRowVisible(widget, bool) hides
-        # both the field and its label.
-        self.form.setRowVisible(self.api_key_wrap, not is_local)
-        self.form.setRowVisible(self.yorik_url_edit, pid == "yorik")
-        self.form.setRowVisible(self.model_box, not is_local)
-        self.form.setRowVisible(self.test_btn, not is_local)
-        self.form.setRowVisible(self.local_status_label, is_local)
-        self.form.setRowVisible(self.local_download_btn, is_local)
-        self.form.setRowVisible(self.local_threads_box, is_local)
-
-        # Hint text at the bottom of the dialog.
-        if is_local:
-            self.hint.setText(
-                "Runs entirely offline on your CPU. Model: parakeet-primeline "
-                "(German, ~640 MB, CC-BY-4.0). Attribution: primeline · NVIDIA · "
-                "<a href='https://github.com/k2-fsa/sherpa-onnx'>k2-fsa/sherpa-onnx</a>."
-            )
-        elif pid == "openai":
-            self.hint.setText(
-                "OpenAI key: <a href='https://platform.openai.com/api-keys'>platform.openai.com/api-keys</a>."
-            )
-        else:
-            self.hint.setText(
-                "Get a free Groq API key at <a href='https://console.groq.com'>console.groq.com</a>."
-            )
-
-        self.refresh_model_box(pdef["default_model"])
-        if is_local:
-            self._refresh_local_status()
+        self.hint.setText(
+            "Runs entirely offline on your CPU. Model: parakeet-primeline "
+            "(German, ~640 MB, CC-BY-4.0). Attribution: primeline · NVIDIA · "
+            "<a href='https://github.com/k2-fsa/sherpa-onnx'>k2-fsa/sherpa-onnx</a>."
+        )
+        self._refresh_local_status()
 
     def _refresh_local_status(self):
         try:
@@ -260,53 +168,12 @@ class SettingsDialog(QDialog):
         self.local_download_btn.setEnabled(True)
         self.local_download_btn.setText("Re-download model" if ok else "Retry download")
 
-    def refresh_model_box(self, preferred_model):
-        pid = self.provider_box.currentData()
-        pdef = core.PROVIDERS[pid]
-        self.model_box.blockSignals(True)
-        self.model_box.clear()
-        for label, mid in pdef["models"]:
-            self.model_box.addItem(label, mid)
-        i = self.model_box.findData(preferred_model)
-        if i < 0:
-            i = self.model_box.findData(pdef["default_model"])
-        self.model_box.setCurrentIndex(max(i, 0))
-        self.model_box.blockSignals(False)
-
-    def on_test(self):
-        key = self.api_key_edit.text().strip()
-        if not key:
-            QMessageBox.warning(self, "Dictate", "Enter an API key first.")
-            return
-        self.test_btn.setEnabled(False)
-        self.test_btn.setText("Testing...")
-        QApplication.processEvents()
-        ok = core.test_api_key(key, self.provider_box.currentData(),
-                               cfg={"yorik_url": self.yorik_url_edit.text().strip()})
-        self.test_btn.setEnabled(True)
-        self.test_btn.setText("Test API key")
-        if ok:
-            QMessageBox.information(self, "Dictate", "API key works.")
-        else:
-            QMessageBox.warning(self, "Dictate", "API key rejected.")
-
     def values(self):
-        # Sync current field back into the per-provider cache first, but only
-        # if the shown provider actually has a key_field (local providers don't).
-        pid = self.provider_box.currentData()
-        if pid in self._keys:
-            self._keys[pid] = self.api_key_edit.text().strip()
         return {
-            "provider":              pid,
-            "api_key":               self._keys.get("groq", ""),
-            "openai_api_key":        self._keys.get("openai", ""),
             "mode":                  self.mode_box.currentData(),
             "key":                   self.key_box.currentData(),
-            "model":                 self.model_box.currentData(),
             "threshold":             float(self.threshold_box.value()),
             "local_stt_num_threads": int(self.local_threads_box.value()),
-            "yorik_url":             self.yorik_url_edit.text().strip() or core.DEFAULT_CONFIG["yorik_url"],
-            "yorik_token":           self._keys.get("yorik", ""),
         }
 
 
@@ -456,16 +323,12 @@ class MainWindow(QMainWindow):
         self.start_listener()
         self._preload_local_if_needed()
 
-        if not core.provider_key(self.cfg):
+        if not core.model_ready():
             QTimer.singleShot(250, self.first_run)
 
     def _preload_local_if_needed(self):
         """Kick off the parakeet recognizer load in the background so the first
         real dictation isn't slowed by the ~0.8s model load + warmup."""
-        provider = self.cfg.get("provider")
-        pdef = core.PROVIDERS.get(provider, {})
-        if not pdef.get("is_local"):
-            return
         try:
             import local_stt
         except ImportError:
@@ -478,10 +341,8 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Welcome to Dictate",
-            "Open Settings to pick a transcription provider:\n\n"
-            "  * Groq (cloud, free tier — console.groq.com)\n"
-            "  * OpenAI (cloud — platform.openai.com)\n"
-            "  * Local (offline, German, CPU — one-time 640 MB download)",
+            "Dictate transcribes offline (German, CPU).\n\n"
+            "Open Settings and download the model once (~640 MB).",
         )
         self.open_settings()
 
@@ -491,7 +352,7 @@ class MainWindow(QMainWindow):
         thr_str = f"     Min hold: {thr:.1f}s" if thr > 0 else ""
         self.info_label.setText(
             f"Mode: {mode_name}     Hotkey: {self.cfg['key'].upper()}     "
-            f"Model: {self.cfg['model']}{thr_str}"
+            f"Model: {core.MODEL_NAME}{thr_str}"
         )
 
     def open_settings(self):
@@ -592,8 +453,8 @@ class MainWindow(QMainWindow):
         self.recording_active = False
 
     def start_recording(self) -> bool:
-        if not core.provider_key(self.cfg):
-            self.set_status("error", "No API key — open Settings")
+        if not core.model_ready():
+            self.set_status("error", "Model not installed — open Settings")
             return False
         try:
             self.recorder.start()
@@ -628,6 +489,7 @@ class MainWindow(QMainWindow):
         audio = core.Recorder.finish(take)
         if audio is None:
             core.log.warning("no audio captured (mic delivered no frames)")
+            self.recorder.mark_stale()
             self.bridge.error.emit("No audio captured — check the microphone")
             return
         secs = len(audio) / core.SAMPLE_RATE
@@ -644,6 +506,8 @@ class MainWindow(QMainWindow):
         if not text:
             # Peak is out of 32768; a live mic with speech is in the thousands.
             why = "microphone was silent" if peak < 300 else "no speech recognised"
+            if peak < 300:
+                self.recorder.mark_stale()
             if peak >= 300:
                 core.keep_failed_audio(audio)
             self.bridge.error.emit(f"Nothing transcribed ({secs:.0f}s) — {why}")

@@ -1,6 +1,6 @@
 # Dictate
 
-Voice dictation to keyboard on Linux — cloud (Groq / OpenAI) or fully offline (Parakeet, German, CPU).
+Voice dictation to keyboard on Linux — fully offline (Parakeet, German, CPU).
 
 Hold a hotkey, speak, release — the transcribed text is typed wherever your cursor is. Works in any application (X11 and native Wayland alike), including editors, terminals, browsers, chat windows.
 
@@ -9,22 +9,18 @@ Hold a hotkey, speak, release — the transcribed text is typed wherever your cu
 - Push-to-talk or tap-to-toggle modes
 - System tray icon with status (ready / recording / transcribing)
 - Hotkey bound to any function key, modifier (Ctrl / Alt / Shift), or Logitech-style mouse side button
-- Four transcription backends:
-  - **Yorik** (home server) — sends the clip to a Yorik install on the LAN (`/v1/audio/transcriptions`, personal API token from Yorik's Settings → API tokens). One Parakeet for every device in the house; this machine carries no model.
-  - **Groq** cloud — `whisper-large-v3-turbo`, `whisper-large-v3`
-  - **OpenAI** cloud — `gpt-4o-mini-transcribe`, `gpt-4o-transcribe`, `whisper-1`
-  - **Local** offline — `parakeet-primeline` (German fine-tune of `nvidia/parakeet-tdt-0.6b-v3`, int8 ONNX via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)). CPU-only, ~50 ms decode for 2 s audio at 4 threads. No network, no API key.
+- Offline transcription with `parakeet-primeline` (German fine-tune of `nvidia/parakeet-tdt-0.6b-v3`, int8 ONNX via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)). CPU-only, ~50 ms decode for 2 s audio at 4 threads. No network, no API key.
 - Optional minimum-hold threshold to ignore accidental modifier presses
-- API keys stored locally in `~/.config/dictate/config.json` (mode 600)
+- Settings stored in `~/.config/dictate/config.json` (mode 600)
 - **Wayland-compatible**: uses `evdev` for key capture and `ydotool` for typing, falls back to `pynput`/`xdotool` on X11
-- **Windows / macOS**: `pip install PyQt6 sounddevice pynput requests numpy` and run `python gui.py`; hotkeys and typing go through `pynput`. Pair it with the Yorik provider and the machine needs no model.
+- **Windows / macOS**: `pip install PyQt6 sounddevice pynput numpy sherpa-onnx soundfile huggingface_hub` and run `python gui.py`; hotkeys and typing go through `pynput`.
 
 ## Requirements
 
 - Linux (X11 or Wayland — see the Wayland section below)
 - Python 3.10+
 - A microphone that PipeWire/PulseAudio can see
-- Either a Groq API key (free tier at [console.groq.com](https://console.groq.com)), an OpenAI API key — or nothing at all: the Local provider needs no key and no network
+- About 640 MB of disk for the speech model. No API key and no network after the one-time download
 
 ## Install
 
@@ -37,17 +33,17 @@ cd dictate
 The installer adds:
 
 - system packages: `xdotool`, `ydotool`, `python3-evdev`, `libnotify-bin`, `python3-pip`, `libxcb-cursor0`, `libportaudio2`
-- Python packages: `PyQt6`, `sounddevice`, `pynput`, `requests`, `numpy`, `sherpa-onnx`, `soundfile`, `huggingface_hub`
+- Python packages: `PyQt6`, `sounddevice`, `pynput`, `numpy`, `sherpa-onnx`, `soundfile`, `huggingface_hub`
 - membership in group `input` (needed for evdev on Wayland)
 - a desktop entry so **Dictate** shows up in your app menu
 
-The Parakeet ONNX model itself (~640 MB) is *not* downloaded by `install.sh` — the download is triggered on demand from Settings when you first pick the local backend, so users who only want cloud transcription don't pay the disk cost.
+The Parakeet ONNX model itself (~640 MB) is *not* downloaded by `install.sh` — the download is triggered from Settings (or the first-run prompt).
 
 If the installer added you to the `input` group you must log out and back in for it to take effect (or reboot — see WAYLAND_NOTES.md for the `systemd-linger` gotcha that can defeat a plain logout).
 
 ## First run
 
-Launch **Dictate** from the app menu (or `python3 gui.py`). On first launch you will be prompted to pick a provider and paste an API key.
+Launch **Dictate** from the app menu (or `python3 gui.py`). On first launch Settings opens so you can download the model.
 
 ## Usage
 
@@ -55,16 +51,14 @@ Default hotkey is **F9**. Hold it, speak, release. The transcription is typed at
 
 In **Settings** you can change:
 
-- **Provider** — Groq, OpenAI, or Local (Parakeet DE)
 - **Mode** — push-to-talk (hold) or toggle (tap to start / tap to stop)
 - **Hotkey** — F1–F12, modifier keys (Ctrl / Alt / Shift / Super), or one of the Logitech-style mouse side buttons (`MOUSE BACK`, `MOUSE FORWARD`, `MOUSE SIDE`, `MOUSE EXTRA`, `MOUSE TASK`). Mouse buttons only work with the evdev backend (i.e. `input`-group setup complete).
-- **Model** — provider-specific list (cloud only)
-- **CPU threads** (Local only) — sherpa-onnx worker threads. 4 is the sweet spot on typical CPUs; more brings little benefit and starves the rest of the system.
+- **CPU threads** — sherpa-onnx worker threads. 4 is the sweet spot on typical CPUs; more brings little benefit and starves the rest of the system.
 - **Min hold to send** — recordings shorter than this duration are discarded. Recommended ~2.0s when bound to Ctrl / Alt / Shift so regular keyboard shortcuts do not trigger recording.
 
-## Local (offline) transcription
+## Offline transcription
 
-Selecting the **Local (Parakeet DE, CPU offline)** provider gives you German dictation with no network at all. On first selection Settings shows a "Download model (~640 MB)" button — the ONNX weights come from the pinned HuggingFace revision of [`flozen1981/parakeet-primeline-onnx`](https://huggingface.co/flozen1981/parakeet-primeline-onnx) and land in `~/.local/share/dictate/models/parakeet-primeline-onnx/`.
+Dictate gives you German dictation with no network at all. Settings shows a "Download model (~640 MB)" button — the ONNX weights come from the pinned HuggingFace revision of [`flozen1981/parakeet-primeline-onnx`](https://huggingface.co/flozen1981/parakeet-primeline-onnx) and land in `~/.local/share/dictate/models/parakeet-primeline-onnx/`.
 
 Latency on a modest desktop CPU (measured on a Ryzen 9 workstation, 4 sherpa-onnx threads): about 50 ms decode for a 2 s clip, 100 ms for a 5 s clip. Model load + warmup happens once in the background at Dictate startup (~0.8 s).
 
@@ -107,35 +101,20 @@ If a hotkey silently does nothing after install, the two things to check are:
 
 See `WAYLAND_NOTES.md` for the longer story of the four combined bugs that had to be untangled to make this work on GNOME Wayland with NVIDIA.
 
-## CLI variant
-
-There is also a headless `dictate.py` (unchanged from initial release, uses `pynput` + `xdotool` directly) that reads the API key from the `GROQ_API_KEY` environment variable:
-
-```bash
-export GROQ_API_KEY=gsk_...
-python3 dictate.py --mode ptt --key f9
-```
-
-The CLI variant only works on X11 for the reasons described above. Use `gui.py` on Wayland.
-
 ## Configuration file
 
 `~/.config/dictate/config.json`:
 
 ```json
 {
-  "provider": "groq",
-  "api_key": "gsk_...",
-  "openai_api_key": "sk-...",
   "mode": "ptt",
   "key": "f9",
-  "model": "whisper-large-v3-turbo",
   "threshold": 0.0,
   "local_stt_num_threads": 4
 }
 ```
 
-For `provider`, valid values are `"groq"`, `"openai"`, or `"parakeet_local"`.
+Obsolete keys from older versions are ignored and dropped on the next save.
 
 ## License
 

@@ -9,7 +9,6 @@ import wave
 from pathlib import Path
 
 import numpy as np
-import requests
 import sounddevice as sd
 import sys
 from pynput import keyboard
@@ -17,62 +16,7 @@ from pynput import keyboard
 SAMPLE_RATE = 16000
 CHANNELS = 1
 
-PROVIDERS = {
-    "groq": {
-        "label":         "Groq",
-        "url":           "https://api.groq.com/openai/v1/audio/transcriptions",
-        "models_url":    "https://api.groq.com/openai/v1/models",
-        "key_field":     "api_key",
-        "key_prefix":    "gsk_",
-        "default_model": "whisper-large-v3-turbo",
-        "models": [
-            ("whisper-large-v3-turbo (fastest)",   "whisper-large-v3-turbo"),
-            ("whisper-large-v3 (most accurate)",    "whisper-large-v3"),
-        ],
-        "is_local":      False,
-    },
-    "openai": {
-        "label":         "OpenAI",
-        "url":           "https://api.openai.com/v1/audio/transcriptions",
-        "models_url":    "https://api.openai.com/v1/models",
-        "key_field":     "openai_api_key",
-        "key_prefix":    "sk-",
-        "default_model": "gpt-4o-mini-transcribe",
-        "models": [
-            ("gpt-4o-mini-transcribe (fast · cheap)", "gpt-4o-mini-transcribe"),
-            ("gpt-4o-transcribe (best quality)",      "gpt-4o-transcribe"),
-            ("whisper-1 (classic)",                   "whisper-1"),
-        ],
-        "is_local":      False,
-    },
-    "yorik": {
-        "label":         "Yorik (home server)",
-        "url":           "http://127.0.0.1:8000/v1/audio/transcriptions",
-        "models_url":    None,
-        "key_field":     "yorik_token",
-        "key_prefix":    "yk_",
-        "default_model": "parakeet",
-        "models": [("Yorik's configured engine (Parakeet, CPU)", "parakeet")],
-        "is_local":      False,
-        "url_field":     "yorik_url",   # base URL, editable in Settings
-    },
-    "parakeet_local": {
-        "label":         "Local (Parakeet DE, CPU offline)",
-        "url":           None,
-        "models_url":    None,
-        "key_field":     None,
-        "key_prefix":    None,
-        "default_model": "parakeet-primeline-int8",
-        "models": [("parakeet-primeline (German, int8)", "parakeet-primeline-int8")],
-        "is_local":      True,
-    },
-}
-
-# Backward-compat aliases used elsewhere in the codebase.
-DEFAULT_PROVIDER = "groq"
-DEFAULT_MODEL    = PROVIDERS[DEFAULT_PROVIDER]["default_model"]
-GROQ_URL         = PROVIDERS["groq"]["url"]
-GROQ_MODELS_URL  = PROVIDERS["groq"]["models_url"]
+MODEL_NAME = "parakeet-primeline-int8"
 
 CONFIG_DIR = Path.home() / ".config" / "dictate"
 CONFIG_PATH = CONFIG_DIR / "config.json"
@@ -119,50 +63,29 @@ KEY_MAP.update({
 })
 
 DEFAULT_CONFIG = {
-    "provider":              DEFAULT_PROVIDER,
-    "api_key":               "",   # Groq key (kept name for backward compat)
-    "openai_api_key":        "",   # OpenAI key
     "mode":                  "ptt",
     "key":                   "f9",
-    "model":                 DEFAULT_MODEL,
     "threshold":             0.0,
-    "local_stt_num_threads": 4,    # sherpa-onnx CPU thread count for parakeet_local
-    "yorik_url":             "http://127.0.0.1:8000",  # Yorik base URL (provider "yorik")
-    "yorik_token":           "",   # personal API token from Yorik Settings → API tokens
+    "local_stt_num_threads": 4,    # sherpa-onnx CPU thread count
 }
 
 
-def provider_url(cfg, p):
-    """Endpoint URL for an HTTP provider; Yorik's comes from the config."""
-    if p.get("url_field"):
-        base = (cfg.get(p["url_field"]) or "").strip().rstrip("/")
-        if base:
-            return base + "/v1/audio/transcriptions"
-    return p["url"]
-
-
-def provider_key(cfg):
-    """Return a truthy value iff the selected provider is ready to use.
-
-    HTTP providers need an API key. The local provider is 'ready' when the
-    ONNX model files have been downloaded — no key, no network.
-    """
-    provider = cfg.get("provider", DEFAULT_PROVIDER)
-    p = PROVIDERS.get(provider, PROVIDERS[DEFAULT_PROVIDER])
-    if p.get("is_local"):
-        try:
-            import local_stt
-            return "installed" if local_stt.model_installed() else ""
-        except ImportError:
-            return ""
-    return cfg.get(p["key_field"], "")
+def model_ready():
+    """True once the local ONNX model files have been downloaded."""
+    try:
+        import local_stt
+        return local_stt.model_installed()
+    except ImportError:
+        return False
 
 
 def load_config():
     cfg = dict(DEFAULT_CONFIG)
     if CONFIG_PATH.exists():
         try:
-            cfg.update(json.loads(CONFIG_PATH.read_text()))
+            saved = json.loads(CONFIG_PATH.read_text())
+            # Ignore keys from older versions that are no longer supported.
+            cfg.update({k: v for k, v in saved.items() if k in DEFAULT_CONFIG})
         except Exception:
             pass
     return cfg
@@ -260,7 +183,23 @@ class Recorder:
 
     def __init__(self):
         self._take = None
+        self._stale = False
         self.lock = threading.Lock()
+
+    def mark_stale(self):
+        """The last take got no frames or only silence. PortAudio caches its
+        device list, so after a USB/PipeWire device change it keeps opening a
+        dead device until it is re-initialised; do that before the next take."""
+        self._stale = True
+
+    def _reinit_audio(self):
+        self._stale = False
+        try:
+            sd._terminate()
+            sd._initialize()
+            log.info("PortAudio re-initialised, default input: %s", sd.query_devices(kind="input")["name"])
+        except Exception:
+            log.exception("PortAudio re-init failed")
 
     @property
     def recording(self):
@@ -270,6 +209,8 @@ class Recorder:
         with self.lock:
             if self._take is not None:
                 return
+            if self._stale:
+                self._reinit_audio()
             frames = []
 
             def callback(indata, n, time_info, status):
@@ -342,42 +283,6 @@ def keep_failed_audio(audio):
 
 
 def transcribe(audio, cfg):
-    provider = cfg.get("provider", DEFAULT_PROVIDER)
-    p = PROVIDERS.get(provider, PROVIDERS[DEFAULT_PROVIDER])
-    if p.get("is_local"):
-        import local_stt
-        threads = int(cfg.get("local_stt_num_threads", local_stt.DEFAULT_THREADS))
-        return local_stt.get_recognizer(num_threads=threads).transcribe(audio)
-    # HTTP providers
-    key = cfg.get(p["key_field"], "")
-    model = cfg.get("model") or p["default_model"]
-    wav = to_wav_bytes(audio)
-    files = {"file": ("audio.wav", wav, "audio/wav")}
-    data = {"model": model, "response_format": "text"}
-    headers = {"Authorization": f"Bearer {key}"}
-    r = requests.post(provider_url(cfg, p), files=files, data=data, headers=headers, timeout=30)
-    r.raise_for_status()
-    return r.text.strip()
-
-
-def test_api_key(api_key, provider=DEFAULT_PROVIDER, cfg=None):
-    p = PROVIDERS.get(provider, PROVIDERS[DEFAULT_PROVIDER])
-    if provider == "yorik":
-        # A token is valid when Yorik lists the caller's tokens with it.
-        base = ((cfg or {}).get("yorik_url") or DEFAULT_CONFIG["yorik_url"]).strip().rstrip("/")
-        try:
-            r = requests.get(base + "/api/tokens", headers={"Authorization": f"Bearer {api_key}"}, timeout=10)
-            return r.status_code == 200
-        except Exception:
-            return False
-    if p.get("is_local") or not p.get("models_url"):
-        return False  # no key to test — caller should not have called this
-    try:
-        r = requests.get(
-            p["models_url"],
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=5,
-        )
-        return r.status_code == 200
-    except Exception:
-        return False
+    import local_stt
+    threads = int(cfg.get("local_stt_num_threads", local_stt.DEFAULT_THREADS))
+    return local_stt.get_recognizer(num_threads=threads).transcribe(audio)

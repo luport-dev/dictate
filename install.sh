@@ -21,11 +21,11 @@ systemctl --user enable --now ydotool.service 2>/dev/null || true
 
 echo
 echo "[2/4] Installing Python packages..."
-# Core deps: GUI, audio capture, hotkey listener, HTTP client, arrays.
+# Core deps: GUI, audio capture, hotkey listener, arrays.
 # Local-STT deps: sherpa-onnx runs Parakeet on CPU offline; soundfile is a
 # common companion; huggingface_hub downloads the model on demand.
 pip install --user --break-system-packages \
-    PyQt6 sounddevice pynput requests numpy \
+    PyQt6 sounddevice pynput numpy \
     sherpa-onnx soundfile huggingface_hub
 
 echo
@@ -52,7 +52,7 @@ cat > ~/.local/share/applications/dictate.desktop <<EOF
 Type=Application
 Name=Dictate
 GenericName=Voice dictation
-Comment=Voice dictation to keyboard (Groq / OpenAI Whisper)
+Comment=Voice dictation to keyboard (offline, Parakeet)
 Exec=python3 ${SCRIPT_DIR}/gui.py
 Icon=dictate
 Terminal=false
@@ -69,7 +69,4 @@ echo "Launch:"
 echo "  - From app menu: 'Dictate'"
 echo "  - From shell:    python3 ${SCRIPT_DIR}/gui.py"
 echo
-echo "On first launch: open Settings and pick a provider."
-echo "  - Groq (cloud, free tier):  https://console.groq.com"
-echo "  - OpenAI (cloud):           https://platform.openai.com/api-keys"
-echo "  - Local (offline German):   click 'Download model' in Settings (~640 MB, one-time)"
+echo "On first launch: open Settings and click 'Download model' (~640 MB, one-time)."
