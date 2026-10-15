@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import logging.handlers
+import os
 import subprocess
 import threading
 import wave
@@ -18,9 +19,16 @@ CHANNELS = 1
 
 MODEL_NAME = "parakeet-primeline-int8"
 
-CONFIG_DIR = Path.home() / ".config" / "dictate"
+IS_LINUX = sys.platform.startswith("linux")
+
+if sys.platform == "win32":
+    CONFIG_DIR = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "dictate"
+    STATE_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "dictate"
+else:
+    CONFIG_DIR = Path.home() / ".config" / "dictate"
+    STATE_DIR = Path.home() / ".local" / "state" / "dictate"
 CONFIG_PATH = CONFIG_DIR / "config.json"
-LOG_PATH = Path.home() / ".local" / "state" / "dictate" / "dictate.log"
+LOG_PATH = STATE_DIR / "dictate.log"
 
 log = logging.getLogger("dictate")
 
@@ -29,7 +37,8 @@ def setup_logging():
     """Every recording leaves one line in LOG_PATH, so a dictation that went
     nowhere can be traced afterwards. Never logs transcribed text."""
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    h = logging.handlers.RotatingFileHandler(LOG_PATH, maxBytes=1_000_000, backupCount=2)
+    h = logging.handlers.RotatingFileHandler(LOG_PATH, maxBytes=1_000_000, backupCount=2,
+                                             encoding="utf-8")
     h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     log.addHandler(h)
     log.setLevel(logging.INFO)
@@ -73,6 +82,8 @@ DEFAULT_CONFIG = {
 
 def _pipewire_descriptions():
     """node.name -> human-readable description of PipeWire's audio sources."""
+    if not IS_LINUX:
+        return {}
     try:
         out = subprocess.run(["pw-dump"], capture_output=True, text=True, timeout=3).stdout
         nodes = json.loads(out)
@@ -88,6 +99,8 @@ def _pipewire_descriptions():
 
 def friendly_device_name(name, descs=None):
     """Readable label for a PortAudio/PipeWire source name."""
+    if not IS_LINUX:
+        return name   # Windows device names are already readable
     desc = (descs if descs is not None else _pipewire_descriptions()).get(name)
     if desc:
         return desc
@@ -97,16 +110,26 @@ def friendly_device_name(name, descs=None):
     return label.replace("_", " ").replace("-", " ").strip()
 
 
+def _offered(d):
+    """Whether a PortAudio device belongs in the microphone list. Linux: only
+    the sources PipeWire offers, not the raw ALSA hw:* entries that bypass
+    PipeWire and clash with it. Windows lists every microphone once per host
+    API (MME, DirectSound, WASAPI, WDM-KS), so keep only the default API's."""
+    if d["max_input_channels"] <= 0:
+        return False
+    if IS_LINUX:
+        return d["name"].startswith("alsa_input.")
+    return d["hostapi"] == sd.default.hostapi
+
+
 def list_input_devices():
-    """(label, name) of the microphones PipeWire offers (via PortAudio),
-    without the raw ALSA hw:* entries that bypass PipeWire and clash with it."""
+    """(label, name) of the microphones to offer in Settings."""
     try:
         devs = sd.query_devices()
     except Exception:
         return []
     descs = _pipewire_descriptions()
-    return [(friendly_device_name(d["name"], descs), d["name"]) for d in devs
-            if d["max_input_channels"] > 0 and d["name"].startswith("alsa_input.")]
+    return [(friendly_device_name(d["name"], descs), d["name"]) for d in devs if _offered(d)]
 
 
 def _resolve_device(name):
@@ -115,7 +138,7 @@ def _resolve_device(name):
     if not name:
         return None
     for i, d in enumerate(sd.query_devices()):
-        if d["max_input_channels"] > 0 and d["name"] == name:
+        if _offered(d) and d["name"] == name:
             return i
     log.warning("configured microphone %r not found, using the system default", name)
     return None
@@ -164,7 +187,15 @@ def save_config(cfg):
         pass
 
 
+# Set by the GUI where notify-send does not exist (Windows): shows the
+# message as a tray balloon instead. Called as notifier(msg, urgency, timeout_ms).
+notifier = None
+
+
 def notify(msg, urgency="normal", timeout_ms=1500):
+    if notifier:
+        notifier(msg, urgency, timeout_ms)
+        return
     try:
         subprocess.run(
             ["notify-send", "-u", urgency, "-t", str(timeout_ms), "Dictate", msg],
@@ -208,9 +239,8 @@ def type_text(text):
     # writes raw US-QWERTY scancodes via /dev/uinput — layout-agnostic and
     # therefore wrong for non-US keyboards, but there is no better option
     # for global typing into native Wayland windows today.
-    import os
-    if os.name == "nt" or sys.platform == "darwin":
-        # Windows / macOS: no xdotool or ydotool; pynput types through the
+    if not IS_LINUX:
+        # Windows: no xdotool or ydotool; pynput types through the
         # OS input API and respects the active keyboard layout.
         keyboard.Controller().type(text)
         return

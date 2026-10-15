@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Dictate GUI — PyQt6 tray app for offline voice dictation (Parakeet)."""
-import fcntl
+import os
 import sys
 import threading
 import time
 from pathlib import Path
 
 import numpy as np
-from PyQt6.QtCore import Qt, QObject, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QLockFile, QObject, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
@@ -21,8 +21,11 @@ import core
 
 
 def _make_listener(on_press, on_release):
-    """Prefer evdev (works on Wayland+Xorg); fall back to pynput on failure."""
+    """Prefer evdev (works on Wayland+Xorg); fall back to pynput on failure.
+    Windows has no evdev, so it goes straight to pynput."""
     try:
+        if not core.IS_LINUX:
+            raise RuntimeError("not on Linux")
         import evdev_listener
         l = evdev_listener.Listener(on_press=on_press, on_release=on_release)
         l.start()
@@ -45,6 +48,7 @@ class Bridge(QObject):
     typing_done = pyqtSignal()
     mic_error = pyqtSignal(str)
     mic_checked = pyqtSignal(bool)
+    notify = pyqtSignal(str, str, int)
 
 
 class SettingsDialog(QDialog):
@@ -69,6 +73,8 @@ class SettingsDialog(QDialog):
 
         self.key_box = QComboBox()
         for k in core.KEY_MAP:
+            if k.startswith("mouse_") and not core.IS_LINUX:
+                continue   # mouse side buttons need the evdev backend
             self.key_box.addItem(k.upper().replace("_", " "), k)
         i = self.key_box.findData(self.cfg.get("key", "f9"))
         self.key_box.setCurrentIndex(max(i, 0))
@@ -328,6 +334,11 @@ class MainWindow(QMainWindow):
             menu.addAction(a_quit)
             self.tray.setContextMenu(menu)
             self.tray.show()
+            if not core.IS_LINUX:
+                # No notify-send here; core.notify may run on any thread, so
+                # hop to the GUI thread through a signal.
+                self.bridge.notify.connect(self.show_tray_message)
+                core.notifier = self.bridge.notify.emit
 
         self._idle_icon = make_state_icon("idle")
         self._motion = None
@@ -590,6 +601,11 @@ class MainWindow(QMainWindow):
         # means the dictation fails without anyone noticing.
         threading.Thread(target=core.notify, args=(msg[:200], "critical", 5000), daemon=True).start()
 
+    def show_tray_message(self, msg, urgency, timeout_ms):
+        icon = (QSystemTrayIcon.MessageIcon.Critical if urgency == "critical"
+                else QSystemTrayIcon.MessageIcon.Information)
+        self.tray.showMessage("Dictate", msg, icon, timeout_ms)
+
     def set_status(self, state, msg):
         bg, fg = STATUS_STYLES.get(state, STATUS_STYLES["ready"])
         self.status_label.setText(msg)
@@ -627,25 +643,30 @@ class MainWindow(QMainWindow):
             QApplication.quit()
 
 
-_LOCK_FD = None
+_LOCK = None
 
 
 def acquire_single_instance_lock():
-    global _LOCK_FD
+    """QLockFile works on Linux and Windows alike. A lock left by a crashed
+    instance is taken over, because Qt sees that its PID is gone. Not named
+    dictate.lock: that empty file from the old flock version would never
+    count as stale and block startup forever."""
+    global _LOCK
     core.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    lock_path = core.CONFIG_DIR / "dictate.lock"
-    fd = open(lock_path, "w")
-    try:
-        fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        fd.close()
+    lock = QLockFile(str(core.CONFIG_DIR / "instance.lock"))
+    lock.setStaleLockTime(0)
+    if not lock.tryLock(0):
         core.notify("Dictate is already running", urgency="low")
         return False
-    _LOCK_FD = fd
+    _LOCK = lock
     return True
 
 
 def main():
+    # Started via pythonw.exe (the Windows shortcut) there is no console and
+    # sys.stderr is None; the model download's progress bar would crash on it.
+    if sys.stderr is None:
+        sys.stdout = sys.stderr = open(os.devnull, "w")
     if not acquire_single_instance_lock():
         sys.exit(0)
     core.setup_logging()

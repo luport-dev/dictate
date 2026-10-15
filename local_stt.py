@@ -4,13 +4,19 @@ Offline transducer. Loads once at first use, warmed up so subsequent decodes
 have consistent latency. Not thread-safe over a single recognizer instance —
 we serialize decode calls with a lock; for single-user dictation that's fine.
 """
+import os
+import sys
 import threading
 from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
 
-MODEL_DIR = Path.home() / ".local" / "share" / "dictate" / "models" / "parakeet-primeline-onnx"
+if sys.platform == "win32":
+    DATA_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "dictate"
+else:
+    DATA_DIR = Path.home() / ".local" / "share" / "dictate"
+MODEL_DIR = DATA_DIR / "models" / "parakeet-primeline-onnx"
 MODEL_REPO = "flozen1981/parakeet-primeline-onnx"
 # Pin the revision so users always get the exact bits we tested against.
 MODEL_REVISION = "d548e25b9bfe559aa274f361892dc4ed5d64743a"

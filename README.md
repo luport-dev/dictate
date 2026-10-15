@@ -1,6 +1,6 @@
 # Dictate
 
-Voice dictation to keyboard on Linux — fully offline (Parakeet, German, CPU).
+Voice dictation to keyboard on Linux and Windows — fully offline (Parakeet, German, CPU).
 
 Hold a hotkey, speak, release — the transcribed text is typed wherever your cursor is. Works in any application (X11 and native Wayland alike), including editors, terminals, browsers, chat windows.
 
@@ -11,15 +11,15 @@ Hold a hotkey, speak, release — the transcribed text is typed wherever your cu
 - Hotkey bound to any function key, modifier (Ctrl / Alt / Shift), or Logitech-style mouse side button
 - Offline transcription with `parakeet-primeline` (German fine-tune of `nvidia/parakeet-tdt-0.6b-v3`, int8 ONNX via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)). CPU-only, ~50 ms decode for 2 s audio at 4 threads. No network, no API key.
 - Optional minimum-hold threshold to ignore accidental modifier presses
-- Settings stored in `~/.config/dictate/config.json` (mode 600)
+- Settings stored in `~/.config/dictate/config.json` (mode 600; Windows: `%APPDATA%\dictate\config.json`)
 - **Wayland-compatible**: uses `evdev` for key capture and `ydotool` for typing, falls back to `pynput`/`xdotool` on X11
-- **Windows / macOS**: `pip install PyQt6 sounddevice pynput numpy sherpa-onnx soundfile huggingface_hub` and run `python gui.py`; hotkeys and typing go through `pynput`.
+- **Windows**: hotkeys and typing go through `pynput`, notifications appear as tray messages — see [Windows](#windows)
 
 ## Requirements
 
-- Linux (X11 or Wayland — see the Wayland section below)
+- Linux (X11 or Wayland — see the Wayland section below) or Windows 10/11
 - Python 3.10+
-- A microphone that PipeWire/PulseAudio can see
+- A microphone (on Linux one that PipeWire/PulseAudio can see)
 - About 640 MB of disk for the speech model. No API key and no network after the one-time download
 
 ## Install
@@ -40,6 +40,24 @@ The installer adds:
 The Parakeet ONNX model itself (~640 MB) is *not* downloaded by `install.sh` — the download is triggered from Settings (or the first-run prompt).
 
 If the installer added you to the `input` group you must log out and back in for it to take effect (or reboot — see WAYLAND_NOTES.md for the `systemd-linger` gotcha that can defeat a plain logout).
+
+## Windows
+
+Install Python 3.10+ from python.org (tick "Add python.exe to PATH"), then in PowerShell:
+
+```powershell
+git clone https://github.com/winidi/dictate.git
+cd dictate
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+The installer pip-installs the same Python packages as on Linux and adds a **Dictate** entry to the Start menu (started through `pythonw.exe`, so no console window). Nothing else is needed: no group membership, no system packages.
+
+Differences from Linux:
+
+- Mouse side buttons cannot be used as a hotkey (they need the Linux evdev backend); keyboard keys all work
+- The microphone list shows the devices of Windows' default audio API (MME)
+- Files live under `%APPDATA%\dictate\` (config) and `%LOCALAPPDATA%\dictate\` (log, failed recordings, model) instead of `~/.config` / `~/.local`
 
 ## First run
 
