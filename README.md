@@ -70,6 +70,7 @@ Default hotkey is **F9**. Hold it, speak, release. The transcription is typed at
 In **Settings** you can change:
 
 - **Mode** — push-to-talk (hold) or toggle (tap to start / tap to stop)
+- **Paste into** (Wayland) — select **Terminal / Codex CLI (Ctrl+Shift+V)** for terminal input, or **Applications (Ctrl+V)** for browser/editor text fields. The terminal must have Ctrl+Shift+V bound to paste. Switch this setting when changing between these targets.
 - **Hotkey** — F1–F12, modifier keys (Ctrl / Alt / Shift / Super), or one of the Logitech-style mouse side buttons (`MOUSE BACK`, `MOUSE FORWARD`, `MOUSE SIDE`, `MOUSE EXTRA`, `MOUSE TASK`). Mouse buttons only work with the evdev backend (i.e. `input`-group setup complete).
 - **CPU threads** — sherpa-onnx worker threads. 4 is the sweet spot on typical CPUs; more brings little benefit and starves the rest of the system.
 - **Min hold to send** — recordings shorter than this duration are discarded. Recommended ~2.0s when bound to Ctrl / Alt / Shift so regular keyboard shortcuts do not trigger recording.
@@ -92,6 +93,13 @@ If a hotkey silently does nothing after install, the two things to check are:
 2. The Dictate GUI window has a status label. If it never turns "Recording" while you hold the hotkey, evdev is not receiving events. If it turns "Recording" but not "Transcribing" when you release, your microphone is not producing audio — see the troubleshooting section.
 
 ## Troubleshooting
+
+**Codex CLI reports "Failed to paste image: no image on clipboard"**
+
+On Wayland, Dictate uses clipboard paste to preserve umlauts and keyboard layouts.
+With the default Ctrl+V shortcut, Codex CLI can receive an image-paste command.
+Restart Dictate after updating, then choose **Settings → Paste into → Terminal / Codex CLI (Ctrl+Shift+V)**.
+This uses the terminal's text-paste shortcut instead.
 
 **A dictation went nowhere**
 

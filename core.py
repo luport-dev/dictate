@@ -77,6 +77,7 @@ DEFAULT_CONFIG = {
     "threshold":             0.0,
     "local_stt_num_threads": 4,    # sherpa-onnx CPU thread count
     "input_device":          "",   # microphone name; "" = system default
+    "paste_shortcut":        "ctrl+v",  # Wayland: use ctrl+shift+v for terminals
 }
 
 
@@ -205,8 +206,8 @@ def notify(msg, urgency="normal", timeout_ms=1500):
         pass
 
 
-def _paste_wayland(text):
-    """Put text on the clipboard and press Ctrl+V through ydotool. ydotool
+def _paste_wayland(text, paste_shortcut="ctrl+v"):
+    """Put text on the clipboard and send the selected paste shortcut. ydotool
     'type' sends US-QWERTY scancodes, which garbles umlauts, ? and case on a
     German layout; pasting is layout-independent. Restores the old clipboard.
     Returns False if it could not paste, so the caller can fall back to typing."""
@@ -214,8 +215,11 @@ def _paste_wayland(text):
     try:
         old = subprocess.run(["wl-paste", "--no-newline"], capture_output=True, timeout=2)
         subprocess.run(["wl-copy"], input=text.encode(), check=True, timeout=2)
-        # 29 = left ctrl, 47 = v
-        r = subprocess.run(["ydotool", "key", "29:1", "47:1", "47:0", "29:0"],
+        # Linux input codes: 29 = left ctrl, 42 = left shift, 47 = v.
+        # Terminals handle Ctrl+Shift+V; Ctrl+V can reach the CLI as a command.
+        keys = [29, 42, 47] if paste_shortcut == "ctrl+shift+v" else [29, 47]
+        events = [f"{key}:1" for key in keys] + [f"{key}:0" for key in reversed(keys)]
+        r = subprocess.run(["ydotool", "key", *events],
                            capture_output=True, text=True)
         if r.returncode != 0:
             log.error("ydotool paste key failed: %s", r.stderr.strip())
@@ -230,7 +234,7 @@ def _paste_wayland(text):
         return False
 
 
-def type_text(text):
+def type_text(text, paste_shortcut="ctrl+v"):
     if not text:
         return
     # xdotool respects the active XKB layout (correct German umlauts, no y/z
@@ -245,7 +249,7 @@ def type_text(text):
         keyboard.Controller().type(text)
         return
     on_x11 = os.environ.get("XDG_SESSION_TYPE") == "x11"
-    if not on_x11 and _paste_wayland(text):
+    if not on_x11 and _paste_wayland(text, paste_shortcut):
         return
     tools = ["xdotool", "ydotool"] if on_x11 else ["ydotool", "xdotool"]
     for tool in tools:

@@ -80,6 +80,18 @@ class SettingsDialog(QDialog):
         self.key_box.setCurrentIndex(max(i, 0))
         self.form.addRow("Hotkey:", self.key_box)
 
+        self.paste_box = QComboBox()
+        self.paste_box.addItem("Applications (Ctrl+V)", "ctrl+v")
+        self.paste_box.addItem("Terminal / Codex CLI (Ctrl+Shift+V)", "ctrl+shift+v")
+        i = self.paste_box.findData(self.cfg.get("paste_shortcut", "ctrl+v"))
+        self.paste_box.setCurrentIndex(max(i, 0))
+        self.paste_box.setToolTip(
+            "Wayland only: choose Terminal when dictating into Codex CLI.\n"
+            "Choose Applications for browser and editor text fields."
+        )
+        if core.IS_LINUX and os.environ.get("XDG_SESSION_TYPE") != "x11":
+            self.form.addRow("Paste into:", self.paste_box)
+
         # --- Local model ---
         import os as _os
         cpu_max = max(1, _os.cpu_count() or 1)
@@ -199,6 +211,7 @@ class SettingsDialog(QDialog):
             "threshold":             float(self.threshold_box.value()),
             "local_stt_num_threads": int(self.local_threads_box.value()),
             "input_device":          self.mic_box.currentData(),
+            "paste_shortcut":        self.paste_box.currentData(),
         }
 
 
@@ -553,9 +566,10 @@ class MainWindow(QMainWindow):
 
     def on_transcribed(self, text):
         if text:
+            paste_shortcut = self.cfg.get("paste_shortcut", "ctrl+v")
             def _type():
                 try:
-                    core.type_text(text)
+                    core.type_text(text, paste_shortcut)
                 finally:
                     self.bridge.typing_done.emit()
             self.set_status("typing", "Typing...")
