@@ -2,8 +2,10 @@
 # Run:  powershell -ExecutionPolicy Bypass -File install.ps1
 $ErrorActionPreference = "Stop"
 $Dir = $PSScriptRoot
+$Version = python (Join-Path $Dir "version.py")
+if ($LASTEXITCODE -ne 0) { throw "Could not read Dictate version" }
 
-Write-Host "Dictate installer"
+Write-Host "Dictate $Version installer"
 Write-Host "================="
 Write-Host
 
@@ -32,12 +34,12 @@ $Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($Lnk)
 $Shortcut.TargetPath = $Pythonw
 $Shortcut.Arguments = "`"$(Join-Path $Dir 'gui.py')`""
 $Shortcut.WorkingDirectory = $Dir
-$Shortcut.Description = "Voice dictation to keyboard (offline, Parakeet)"
+$Shortcut.Description = "Dictate $Version - Voice dictation to keyboard (offline, Parakeet)"
 if (Test-Path $Ico) { $Shortcut.IconLocation = $Ico }
 $Shortcut.Save()
 
 Write-Host
-Write-Host "Installed."
+Write-Host "Dictate $Version installed."
 Write-Host
 Write-Host "Launch:"
 Write-Host "  - From Start menu: 'Dictate'"

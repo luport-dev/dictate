@@ -2,6 +2,9 @@
 
 Voice dictation to keyboard on Linux and Windows — fully offline (Parakeet, German, CPU).
 
+Current version: **0.1.0** — adds **Restart** to the tray menu. The version is shown
+in the window title and tray tooltip; `python3 version.py` prints it from the shell.
+
 Hold a hotkey, speak, release — the transcribed text is typed wherever your cursor is. Works in any application (X11 and native Wayland alike), including editors, terminals, browsers, chat windows.
 
 ## Features
@@ -66,6 +69,9 @@ Launch **Dictate** from the app menu (or `python3 gui.py`). On first launch Sett
 ## Usage
 
 Default hotkey is **F9**. Hold it, speak, release. The transcription is typed at the cursor.
+
+Right-click the tray icon and choose **Restart** to restart Dictate with your saved
+settings. Any recording or transcription in progress is interrupted.
 
 In **Settings** you can change:
 

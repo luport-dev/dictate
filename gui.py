@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 from pynput import keyboard
 
 import core
+from version import __version__
 
 
 def _make_listener(on_press, on_release):
@@ -277,7 +278,7 @@ STATUS_STYLES = {
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Dictate")
+        self.setWindowTitle(f"Dictate {__version__}")
         self.resize(500, 380)
         self.setWindowIcon(QIcon(str(Path(__file__).with_name("icon.png"))))
 
@@ -336,14 +337,17 @@ class MainWindow(QMainWindow):
         self.tray = None
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray = QSystemTrayIcon(make_state_icon("idle"), self)
-            self.tray.setToolTip("Dictate")
+            self.tray.setToolTip(f"Dictate {__version__}")
             menu = QMenu()
             a_show = QAction("Show window", self)
             a_show.triggered.connect(self.show_window)
+            a_restart = QAction("Restart", self)
+            a_restart.triggered.connect(self.restart_app)
             a_quit = QAction("Quit", self)
             a_quit.triggered.connect(QApplication.quit)
             menu.addAction(a_show)
             menu.addSeparator()
+            menu.addAction(a_restart)
             menu.addAction(a_quit)
             self.tray.setContextMenu(menu)
             self.tray.show()
@@ -628,7 +632,7 @@ class MainWindow(QMainWindow):
             f"background: {bg}; color: {fg};"
         )
         if self.tray:
-            self.tray.setToolTip(f"Dictate — {msg}")
+            self.tray.setToolTip(f"Dictate {__version__} — {msg}")
             self._anim_state = state if state in ("recording", "transcribing", "typing") else None
             self._motion = BarMotion(len(IDLE_SEGMENTS))
             if self._anim_state:
@@ -646,6 +650,25 @@ class MainWindow(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
+
+    def restart_app(self):
+        """Replace this process so audio, hotkeys and the model start fresh."""
+        core.log.info("restarting")
+        # exec keeps the PID on Linux, so the replacement would see our lock
+        # as live and refuse to start unless we release it first.
+        if _LOCK is not None:
+            _LOCK.unlock()
+        try:
+            os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve()),
+                                      *sys.argv[1:]])
+        except OSError as exc:
+            core.log.exception("could not restart")
+            # exec failed: this instance is still usable. Restore its lock
+            # unless another instance has already taken over.
+            if not acquire_single_instance_lock():
+                QApplication.quit()
+                return
+            QMessageBox.critical(self, "Restart failed", f"Could not restart Dictate:\n{exc}")
 
     def closeEvent(self, event):
         # Pure tray app: closing the window only hides it; "Quit" in the tray
@@ -684,13 +707,14 @@ def main():
     if not acquire_single_instance_lock():
         sys.exit(0)
     core.setup_logging()
-    core.log.info("started")
+    core.log.info("started version %s", __version__)
     # Let Ctrl+C in the terminal actually kill us — Qt's C++ event loop
     # otherwise never yields to Python's SIGINT handler.
     import signal
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     app = QApplication(sys.argv)
     app.setApplicationName("Dictate")
+    app.setApplicationVersion(__version__)
     app.setDesktopFileName("dictate")
     has_tray = QSystemTrayIcon.isSystemTrayAvailable()
     app.setQuitOnLastWindowClosed(not has_tray)

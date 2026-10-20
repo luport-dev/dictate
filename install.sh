@@ -2,8 +2,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION="$(python3 "${SCRIPT_DIR}/version.py")"
 
-echo "Dictate installer"
+echo "Dictate ${VERSION} installer"
 echo "================="
 echo
 
@@ -53,17 +54,18 @@ Type=Application
 Name=Dictate
 GenericName=Voice dictation
 Comment=Voice dictation to keyboard (offline, Parakeet)
-Exec=python3 ${SCRIPT_DIR}/gui.py
+Exec=python3 "${SCRIPT_DIR}/gui.py"
 Icon=dictate
 Terminal=false
-Categories=Utility;Audio;Accessibility;
+Categories=Utility;Accessibility;
 StartupNotify=false
+X-Dictate-Version=${VERSION}
 EOF
 
 update-desktop-database ~/.local/share/applications 2>/dev/null || true
 
 echo
-echo "Installed."
+echo "Dictate ${VERSION} installed."
 echo
 echo "Launch:"
 echo "  - From app menu: 'Dictate'"
