@@ -1,7 +1,7 @@
 # Dictate installer for Windows.
-# Run:  powershell -ExecutionPolicy Bypass -File install.ps1
+# Run:  powershell -ExecutionPolicy Bypass -File scripts/install.ps1
 $ErrorActionPreference = "Stop"
-$Dir = $PSScriptRoot
+$Dir = Split-Path $PSScriptRoot -Parent  # repo root
 $Version = python (Join-Path $Dir "src/version.py")
 if ($LASTEXITCODE -ne 0) { throw "Could not read Dictate version" }
 

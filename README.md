@@ -31,7 +31,7 @@ Hold a hotkey, speak, release — the transcribed text is typed wherever your cu
 ```bash
 git clone https://github.com/winidi/dictate.git
 cd dictate
-./install.sh
+./scripts/install.sh
 ```
 
 The installer adds:
@@ -41,7 +41,7 @@ The installer adds:
 - membership in group `input` (needed for evdev on Wayland)
 - a desktop entry so **Dictate** shows up in your app menu
 
-The Parakeet ONNX model itself (~640 MB) is *not* downloaded by `install.sh` — the download is triggered from Settings (or the first-run prompt).
+The Parakeet ONNX model itself (~640 MB) is *not* downloaded by `scripts/install.sh` — the download is triggered from Settings (or the first-run prompt).
 
 If the installer added you to the `input` group you must log out and back in for it to take effect (or reboot — see docs/WAYLAND_NOTES.md for the `systemd-linger` gotcha that can defeat a plain logout).
 
@@ -52,7 +52,7 @@ Install Python 3.10+ from python.org (tick "Add python.exe to PATH"), then in Po
 ```powershell
 git clone https://github.com/winidi/dictate.git
 cd dictate
-powershell -ExecutionPolicy Bypass -File install.ps1
+powershell -ExecutionPolicy Bypass -File scripts/install.ps1
 ```
 
 The installer pip-installs the same Python packages as on Linux and adds a **Dictate** entry to the Start menu (started through `pythonw.exe`, so no console window). Nothing else is needed: no group membership, no system packages.
@@ -101,7 +101,7 @@ Full details for data protection officers (German): [DATENSCHUTZ.md](docs/DATENS
 
 ## Wayland notes
 
-On Wayland (GNOME Mutter in particular) the compositor does not forward global key events to XWayland, so `pynput`'s X-based listener sees nothing. Dictate works around this by reading `/dev/input/event*` directly via `evdev`. The `install.sh` script sets this up. Typing likewise uses `ydotool` (via `/dev/uinput`) because `xdotool` cannot type into native Wayland windows.
+On Wayland (GNOME Mutter in particular) the compositor does not forward global key events to XWayland, so `pynput`'s X-based listener sees nothing. Dictate works around this by reading `/dev/input/event*` directly via `evdev`. The `scripts/install.sh` script sets this up. Typing likewise uses `ydotool` (via `/dev/uinput`) because `xdotool` cannot type into native Wayland windows.
 
 If a hotkey silently does nothing after install, the two things to check are:
 
