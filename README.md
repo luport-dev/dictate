@@ -90,6 +90,15 @@ Latency on a modest desktop CPU (measured on a Ryzen 9 workstation, 4 sherpa-onn
 
 Attribution (CC-BY-4.0): [primeline](https://huggingface.co/flozen1981/parakeet-primeline-onnx) (fine-tune), [NVIDIA](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) (base model), [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (runtime).
 
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The tests run headless and offline: no microphone, no model, no network and no real hotkey hook are needed, and they never touch your configuration. They also guard the privacy promises below (no network libraries, no audio written to disk, no usage logging, telemetry off). The `evdev` tests only run on Linux with `python-evdev` installed.
+
 ## Privacy
 
 Full details for data protection officers (German): [DATENSCHUTZ.md](docs/DATENSCHUTZ.md).
