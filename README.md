@@ -2,8 +2,9 @@
 
 Voice dictation to keyboard on Linux and Windows — fully offline (Parakeet, German, CPU).
 
-Current version: **0.1.0** — adds **Restart** to the tray menu. The version is shown
-in the window title and tray tooltip; `python3 version.py` prints it from the shell.
+Current version: **0.2.3** — the main window is gone; the tray icon (left or right click)
+opens a menu with **Settings**, **Restart** and **Quit**. The version is shown in the
+Settings dialog and the tray tooltip; `python3 version.py` prints it from the shell.
 
 Hold a hotkey, speak, release — the transcribed text is typed wherever your cursor is. Works in any application (X11 and native Wayland alike), including editors, terminals, browsers, chat windows.
 
@@ -60,7 +61,7 @@ Differences from Linux:
 
 - Mouse side buttons cannot be used as a hotkey (they need the Linux evdev backend); keyboard keys all work
 - The microphone list shows the devices of Windows' default audio API (MME)
-- Files live under `%APPDATA%\dictate\` (config) and `%LOCALAPPDATA%\dictate\` (log, failed recordings, model) instead of `~/.config` / `~/.local`
+- Files live under `%APPDATA%\dictate\` (config) and `%LOCALAPPDATA%\dictate\` (log, model) instead of `~/.config` / `~/.local`
 
 ## First run
 
@@ -89,6 +90,15 @@ Latency on a modest desktop CPU (measured on a Ryzen 9 workstation, 4 sherpa-onn
 
 Attribution (CC-BY-4.0): [primeline](https://huggingface.co/flozen1981/parakeet-primeline-onnx) (fine-tune), [NVIDIA](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) (base model), [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (runtime).
 
+## Privacy
+
+Full details for data protection officers (German): [DATENSCHUTZ.md](DATENSCHUTZ.md).
+
+- **No audio or text is stored.** Recordings live in memory only and are discarded after transcription; the transcribed text is typed at the cursor and kept nowhere.
+- **No network use during dictation.** Recognition runs locally on the CPU. The only network access is the optional one-time model download from HuggingFace (which sees your IP address, not your dictation); `huggingface_hub` usage telemetry is disabled (`HF_HUB_DISABLE_TELEMETRY=1`).
+- **Files on disk:** the settings (`config.json`), the model, and `dictate.log`, which holds warnings and errors only — no usage entries and no transcribed text.
+- **Clipboard (Wayland only):** the text is placed on the clipboard for about 0.3 s to paste it, then the previous clipboard content is restored. A clipboard manager running on the system could record it in that moment. On Windows and X11, text is typed directly without the clipboard.
+
 ## Wayland notes
 
 On Wayland (GNOME Mutter in particular) the compositor does not forward global key events to XWayland, so `pynput`'s X-based listener sees nothing. Dictate works around this by reading `/dev/input/event*` directly via `evdev`. The `install.sh` script sets this up. Typing likewise uses `ydotool` (via `/dev/uinput`) because `xdotool` cannot type into native Wayland windows.
@@ -96,7 +106,7 @@ On Wayland (GNOME Mutter in particular) the compositor does not forward global k
 If a hotkey silently does nothing after install, the two things to check are:
 
 1. `groups | grep input` — you must be in the `input` group in the current session. A fresh login is required; on Ubuntu the "Log out" menu item is often hidden when only one account exists, use `gnome-session-quit --logout --no-prompt` or reboot.
-2. The Dictate GUI window has a status label. If it never turns "Recording" while you hold the hotkey, evdev is not receiving events. If it turns "Recording" but not "Transcribing" when you release, your microphone is not producing audio — see the troubleshooting section.
+2. Watch the tray icon (its tooltip shows the state too). If it never switches to "Recording" while you hold the hotkey, evdev is not receiving events. If it switches to "Recording" but not "Transcribing" when you release, your microphone is not producing audio — see the troubleshooting section.
 
 ## Troubleshooting
 
@@ -109,21 +119,20 @@ This uses the terminal's text-paste shortcut instead.
 
 **A dictation went nowhere**
 
-- Every recording leaves one line in `~/.local/state/dictate/dictate.log` (length, peak level, characters, decode time — never the text). A failed one also raises a desktop notification: no audio frames, silent microphone (`peak` under 300 of 32768), nothing recognised, recording cancelled by another key or mouse button while the hotkey was held, or typing failed
+- A failed dictation raises a desktop notification: no audio frames, silent microphone (`peak` under 300 of 32768), nothing recognised, or typing failed. Errors and warnings (never the text, and no entry for successful recordings) are written to `~/.local/state/dictate/dictate.log`
 - The local Parakeet model cannot take more than 400 s in one pass; recordings over 90 s are split at a pause and decoded in pieces. Quiet audio is raised in level before decoding, and a piece that still comes back empty is retried in 20 s parts
-- A recording that had sound but produced no text is saved as a WAV in `~/.local/state/dictate/failed/`, so the failure can be replayed. This is your own voice on disk: only the newest 3 are kept, nothing is uploaded, and you can delete the folder at any time
 
-**Hotkey does nothing / status never changes to "Recording..."**
+**Hotkey does nothing / tray icon never changes to "Recording..."**
 
 - Verify `groups | grep input` in the same terminal you launched Dictate from
 - Check the launcher output for `keyboard listener: evdev`. If it says `evdev unavailable (...) falling back to pynput`, evdev could not open `/dev/input/event*` and pynput will be silently blind on Wayland
 
-**Status turns to "Transcribing..." but never returns to "Ready" (or comes back with empty text)**
+**Tray icon shows "Transcribing..." but never returns to "Ready" (or comes back with empty text)**
 
 - Your PipeWire default source may point at a device that is not currently plugged in. `wpctl status` shows both the runtime default (`*` next to a source) and the *configured* default at the bottom (`Default Configured Node Names`). If the configured default is a mic you have unplugged, `sd.rec()` will hang instead of falling back
 - Fix with `wpctl set-default <ID>` for a live source, or pick an input in GNOME Sound Settings
 
-**Text is transcribed (visible in the "Last transcription" pane) but nothing appears in your target window**
+**Dictation is transcribed (tray icon goes through "Typing...") but nothing appears in your target window**
 
 - `ydotool` is missing or `/dev/uinput` is not writable. Reinstall with `sudo apt install ydotool` and confirm `python3 -c 'import os; os.open("/dev/uinput", os.O_WRONLY)'` succeeds. On systemd systems membership in `input` should be enough
 

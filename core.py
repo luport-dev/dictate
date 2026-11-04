@@ -1,13 +1,15 @@
 """Shared dictation core: config, recording, transcription, typing."""
-import io
 import json
 import logging
 import logging.handlers
 import os
 import subprocess
 import threading
-import wave
 from pathlib import Path
+
+# Privacy: no anonymous usage statistics from huggingface_hub (model download).
+# Set before anything imports it.
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
 import numpy as np
 import sounddevice as sd
@@ -34,14 +36,15 @@ log = logging.getLogger("dictate")
 
 
 def setup_logging():
-    """Every recording leaves one line in LOG_PATH, so a dictation that went
-    nowhere can be traced afterwards. Never logs transcribed text."""
+    """Log warnings and errors only (microphone, typing, restart failures), so
+    the file never records when or how often someone dictated. Never logs
+    transcribed text."""
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     h = logging.handlers.RotatingFileHandler(LOG_PATH, maxBytes=1_000_000, backupCount=2,
                                              encoding="utf-8")
     h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     log.addHandler(h)
-    log.setLevel(logging.INFO)
+    log.setLevel(logging.WARNING)
 
 KEY_MAP = {f"f{i}": {getattr(keyboard.Key, f"f{i}")} for i in range(1, 13)}
 KEY_MAP.update({
@@ -303,7 +306,6 @@ class Recorder:
         try:
             sd._terminate()
             sd._initialize()
-            log.info("PortAudio re-initialised, default input: %s", sd.query_devices(kind="input")["name"])
         except Exception:
             log.exception("PortAudio re-init failed")
 
@@ -357,36 +359,6 @@ class Recorder:
 
     def stop(self):
         return self.finish(self.detach())
-
-
-def to_wav_bytes(audio):
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(CHANNELS)
-        wf.setsampwidth(2)
-        wf.setframerate(SAMPLE_RATE)
-        wf.writeframes(audio.tobytes())
-    buf.seek(0)
-    return buf
-
-
-FAILED_DIR = LOG_PATH.parent / "failed"
-FAILED_KEEP = 3
-
-
-def keep_failed_audio(audio):
-    """Save a recording that held sound but came back empty, so the failure
-    can be replayed. Only the newest FAILED_KEEP files are kept."""
-    try:
-        import time
-        FAILED_DIR.mkdir(parents=True, exist_ok=True)
-        path = FAILED_DIR / time.strftime("%Y%m%d-%H%M%S.wav")
-        path.write_bytes(to_wav_bytes(audio).getvalue())
-        for old in sorted(FAILED_DIR.glob("*.wav"))[:-FAILED_KEEP]:
-            old.unlink()
-        log.info("kept failed recording as %s", path)
-    except Exception:
-        log.exception("could not keep failed recording")
 
 
 def transcribe(audio, cfg):

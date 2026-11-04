@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 from PyQt6.QtCore import Qt, QLockFile, QObject, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
+from PyQt6.QtGui import QAction, QColor, QCursor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu,
@@ -59,7 +59,7 @@ class SettingsDialog(QDialog):
 
     def __init__(self, cfg, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Dictate — Settings")
+        self.setWindowTitle(f"Dictate {__version__}")
         self.cfg = dict(cfg)
 
         self.resize(550, 10)   # about 550 px wide; height follows the content
@@ -153,6 +153,10 @@ class SettingsDialog(QDialog):
         self.hint.setWordWrap(True)
         self.hint.setStyleSheet("color: #777; padding: 6px 0;")
         layout.addWidget(self.hint)
+
+        version_label = QLabel(f"Version {__version__}")
+        version_label.setStyleSheet("color: #777;")
+        layout.addWidget(version_label)
 
         layout.addWidget(buttons)
 
@@ -266,15 +270,6 @@ def make_state_icon(state, segments=IDLE_SEGMENTS):
     return QIcon(pix)
 
 
-STATUS_STYLES = {
-    "ready":        ("#f3f3f3", "#222"),
-    "recording":    ("#fde2e2", "#a00000"),
-    "transcribing": ("#fff3cc", "#8a6d00"),
-    "typing":       ("#dff3e0", "#1b5e20"),
-    "error":        ("#ffd6d6", "#9a0000"),
-}
-
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -295,52 +290,16 @@ class MainWindow(QMainWindow):
         self.recording_active = False
         self.listener = None
         self._target_keys = set()
-        self._last_other = None
 
         self.press_time = 0.0
-
-        central = QWidget()
-        self.setCentralWidget(central)
-        v = QVBoxLayout(central)
-        v.setContentsMargins(20, 18, 20, 18)
-        v.setSpacing(12)
-
-        header = QHBoxLayout()
-        title = QLabel("Dictate")
-        title.setStyleSheet("font-size: 20px; font-weight: 600;")
-        header.addWidget(title)
-        header.addStretch()
-        self.settings_btn = QPushButton("Settings")
-        self.settings_btn.clicked.connect(self.open_settings)
-        header.addWidget(self.settings_btn)
-        v.addLayout(header)
-
-        self.status_label = QLabel("Ready")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        v.addWidget(self.status_label)
-
-        self.info_label = QLabel()
-        self.info_label.setStyleSheet("color: #666; padding: 2px 0;")
-        v.addWidget(self.info_label)
-
-        v.addWidget(QLabel("Last transcription:"))
-        self.last = QTextEdit()
-        self.last.setReadOnly(True)
-        self.last.setMaximumHeight(110)
-        self.last.setStyleSheet(
-            "QTextEdit { background: #fafafa; border: 1px solid #ddd; border-radius: 6px; padding: 6px; }"
-        )
-        v.addWidget(self.last)
-
-        v.addStretch()
 
         self.tray = None
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray = QSystemTrayIcon(make_state_icon("idle"), self)
             self.tray.setToolTip(f"Dictate {__version__}")
             menu = QMenu()
-            a_show = QAction("Show window", self)
-            a_show.triggered.connect(self.show_window)
+            a_show = QAction("Settings", self)
+            a_show.triggered.connect(self.open_settings)
             a_restart = QAction("Restart", self)
             a_restart.triggered.connect(self.restart_app)
             a_quit = QAction("Quit", self)
@@ -350,6 +309,7 @@ class MainWindow(QMainWindow):
             menu.addAction(a_restart)
             menu.addAction(a_quit)
             self.tray.setContextMenu(menu)
+            self.tray.activated.connect(self.on_tray_activated)
             self.tray.show()
             if not core.IS_LINUX:
                 # No notify-send here; core.notify may run on any thread, so
@@ -369,7 +329,6 @@ class MainWindow(QMainWindow):
         self._mic_watch = False
 
         self.set_status("ready", "Ready")
-        self.update_info()
         self.start_listener()
         self._preload_local_if_needed()
 
@@ -396,22 +355,12 @@ class MainWindow(QMainWindow):
         )
         self.open_settings()
 
-    def update_info(self):
-        mode_name = "Push-to-talk" if self.cfg["mode"] == "ptt" else "Toggle"
-        thr = float(self.cfg.get("threshold", 0.0))
-        thr_str = f"     Min hold: {thr:.1f}s" if thr > 0 else ""
-        self.info_label.setText(
-            f"Mode: {mode_name}     Hotkey: {self.cfg['key'].upper()}     "
-            f"Model: {core.MODEL_NAME}{thr_str}"
-        )
-
     def open_settings(self):
         dlg = SettingsDialog(self.cfg, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.cfg.update(dlg.values())
             core.save_config(self.cfg)
             self.restart_listener()
-            self.update_info()
             self._preload_local_if_needed()
 
     def start_listener(self):
@@ -425,7 +374,6 @@ class MainWindow(QMainWindow):
                 if k in self._target_keys:
                     self.bridge.hotkey_press.emit()
                 else:
-                    self._last_other = k
                     self.bridge.other_press.emit()
             except Exception:
                 pass
@@ -477,7 +425,6 @@ class MainWindow(QMainWindow):
             self.recording_active = False
             self.set_status("ready", "Cancelled (combo)")
             held = time.monotonic() - self.press_time
-            core.log.info("cancelled after %.1fs by %s", held, self._last_other)
             # A shortcut like Ctrl+C cancels within a moment and needs no
             # message; a long hold was a dictation that just got thrown away.
             min_hold = float(self.cfg.get("threshold", 0.0))
@@ -545,22 +492,17 @@ class MainWindow(QMainWindow):
             return
         secs = len(audio) / core.SAMPLE_RATE
         peak = int(np.abs(audio).max())
-        t0 = time.monotonic()
         try:
             text = core.transcribe(audio, self.cfg)
         except Exception as e:
             core.log.exception("transcribe failed: %.1fs audio, peak %d", secs, peak)
             self.bridge.error.emit(str(e))
             return
-        core.log.info("transcribed %.1fs audio, peak %d, %d chars in %.1fs",
-                      secs, peak, len(text or ""), time.monotonic() - t0)
         if not text:
             # Peak is out of 32768; a live mic with speech is in the thousands.
             why = "microphone was silent" if peak < 300 else "no speech recognised"
             if peak < 300:
                 self.recorder.mark_stale()
-            if peak >= 300:
-                core.keep_failed_audio(audio)
             if peak < 300:
                 self.bridge.mic_error.emit(f"Microphone not available — {secs:.0f}s of silence")
             else:
@@ -578,7 +520,6 @@ class MainWindow(QMainWindow):
                     self.bridge.typing_done.emit()
             self.set_status("typing", "Typing...")
             threading.Thread(target=_type, daemon=True).start()
-            self.last.setPlainText(text)
         else:
             self.set_status("ready", "Ready")
 
@@ -604,7 +545,6 @@ class MainWindow(QMainWindow):
     def on_mic_checked(self, ok):
         if ok:
             self._mic_watch = False
-            core.log.info("microphone is available again")
             if not self.recording_active:
                 self.set_status("ready", "Ready")
             threading.Thread(target=core.notify, args=("Microphone is back", "low", 2500), daemon=True).start()
@@ -625,12 +565,6 @@ class MainWindow(QMainWindow):
         self.tray.showMessage("Dictate", msg, icon, timeout_ms)
 
     def set_status(self, state, msg):
-        bg, fg = STATUS_STYLES.get(state, STATUS_STYLES["ready"])
-        self.status_label.setText(msg)
-        self.status_label.setStyleSheet(
-            f"font-size: 24px; padding: 28px; border-radius: 10px;"
-            f"background: {bg}; color: {fg};"
-        )
         if self.tray:
             self.tray.setToolTip(f"Dictate {__version__} — {msg}")
             self._anim_state = state if state in ("recording", "transcribing", "typing") else None
@@ -646,14 +580,13 @@ class MainWindow(QMainWindow):
         if self._anim_state:
             self.tray.setIcon(make_state_icon(self._anim_state, self._motion.step()))
 
-    def show_window(self):
-        self.showNormal()
-        self.raise_()
-        self.activateWindow()
+    def on_tray_activated(self, reason):
+        # Right click already shows the context menu; show it on left click too.
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self.tray.contextMenu().popup(QCursor.pos())
 
     def restart_app(self):
         """Replace this process so audio, hotkeys and the model start fresh."""
-        core.log.info("restarting")
         # exec keeps the PID on Linux, so the replacement would see our lock
         # as live and refuse to start unless we release it first.
         if _LOCK is not None:
@@ -669,15 +602,6 @@ class MainWindow(QMainWindow):
                 QApplication.quit()
                 return
             QMessageBox.critical(self, "Restart failed", f"Could not restart Dictate:\n{exc}")
-
-    def closeEvent(self, event):
-        # Pure tray app: closing the window only hides it; "Quit" in the tray
-        # menu is the way to exit. Without a tray there is no way back, so quit.
-        if self.tray:
-            event.ignore()
-            self.hide()
-        else:
-            QApplication.quit()
 
 
 _LOCK = None
@@ -707,7 +631,6 @@ def main():
     if not acquire_single_instance_lock():
         sys.exit(0)
     core.setup_logging()
-    core.log.info("started version %s", __version__)
     # Let Ctrl+C in the terminal actually kill us — Qt's C++ event loop
     # otherwise never yields to Python's SIGINT handler.
     import signal
@@ -720,7 +643,8 @@ def main():
     app.setQuitOnLastWindowClosed(not has_tray)
     win = MainWindow()
     if not has_tray:
-        win.show()
+        # No tray means no other way to reach the settings.
+        QTimer.singleShot(0, win.open_settings)
     sys.exit(app.exec())
 
 
