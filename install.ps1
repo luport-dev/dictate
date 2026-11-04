@@ -2,7 +2,7 @@
 # Run:  powershell -ExecutionPolicy Bypass -File install.ps1
 $ErrorActionPreference = "Stop"
 $Dir = $PSScriptRoot
-$Version = python (Join-Path $Dir "version.py")
+$Version = python (Join-Path $Dir "src/version.py")
 if ($LASTEXITCODE -ne 0) { throw "Could not read Dictate version" }
 
 Write-Host "Dictate $Version installer"
@@ -27,12 +27,12 @@ $Pythonw = Join-Path (Split-Path $Python) "pythonw.exe"
 if (-not (Test-Path $Pythonw)) { $Pythonw = $Python }
 # Shortcuts need an .ico; let Qt convert the PNG. Without it the shortcut
 # just shows the Python icon.
-$Ico = Join-Path $Dir "icon.ico"
-python -c "import sys; from PyQt6.QtGui import QImage; sys.exit(0 if QImage(sys.argv[1]).scaled(256, 256).save(sys.argv[2]) else 1)" (Join-Path $Dir "icon.png") $Ico
+$Ico = Join-Path $Dir "assets/icon.ico"
+python -c "import sys; from PyQt6.QtGui import QImage; sys.exit(0 if QImage(sys.argv[1]).scaled(256, 256).save(sys.argv[2]) else 1)" (Join-Path $Dir "assets/icon.png") $Ico
 $Lnk = Join-Path ([Environment]::GetFolderPath("Programs")) "Dictate.lnk"
 $Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($Lnk)
 $Shortcut.TargetPath = $Pythonw
-$Shortcut.Arguments = "`"$(Join-Path $Dir 'gui.py')`""
+$Shortcut.Arguments = "`"$(Join-Path $Dir 'src/gui.py')`""
 $Shortcut.WorkingDirectory = $Dir
 $Shortcut.Description = "Dictate $Version - Voice dictation to keyboard (offline, Parakeet)"
 if (Test-Path $Ico) { $Shortcut.IconLocation = $Ico }
@@ -43,6 +43,6 @@ Write-Host "Dictate $Version installed."
 Write-Host
 Write-Host "Launch:"
 Write-Host "  - From Start menu: 'Dictate'"
-Write-Host "  - From shell:      python $(Join-Path $Dir 'gui.py')"
+Write-Host "  - From shell:      python $(Join-Path $Dir 'src/gui.py')"
 Write-Host
 Write-Host "On first launch: open Settings and click 'Download model' (~640 MB, one-time)."

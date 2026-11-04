@@ -275,7 +275,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"Dictate {__version__}")
         self.resize(500, 380)
-        self.setWindowIcon(QIcon(str(Path(__file__).with_name("icon.png"))))
+        self.setWindowIcon(QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "icon.png")))
 
         self.cfg = core.load_config()
         self.recorder = core.Recorder()

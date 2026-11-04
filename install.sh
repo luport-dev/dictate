@@ -2,7 +2,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VERSION="$(python3 "${SCRIPT_DIR}/version.py")"
+VERSION="$(python3 "${SCRIPT_DIR}/src/version.py")"
 
 echo "Dictate ${VERSION} installer"
 echo "================="
@@ -38,7 +38,7 @@ if ! id -nG "$USER" | grep -qw input; then
     echo "  Adding $USER to group 'input' (needed for global-hotkey capture on Wayland)."
     sudo usermod -a -G input "$USER"
     echo "  NOTE: log out AND log in again for the new group to take effect."
-    echo "        (or reboot — see WAYLAND_NOTES.md for the 'linger' gotcha)"
+    echo "        (or reboot — see docs/WAYLAND_NOTES.md for the 'linger' gotcha)"
 else
     echo "  Already in group 'input'."
 fi
@@ -46,7 +46,7 @@ fi
 echo
 echo "[4/4] Creating desktop entry..."
 mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps
-cp "${SCRIPT_DIR}/icon.png" ~/.local/share/icons/hicolor/256x256/apps/dictate.png
+cp "${SCRIPT_DIR}/assets/icon.png" ~/.local/share/icons/hicolor/256x256/apps/dictate.png
 gtk-update-icon-cache -q -t ~/.local/share/icons/hicolor 2>/dev/null || true
 cat > ~/.local/share/applications/dictate.desktop <<EOF
 [Desktop Entry]
@@ -54,7 +54,7 @@ Type=Application
 Name=Dictate
 GenericName=Voice dictation
 Comment=Voice dictation to keyboard (offline, Parakeet)
-Exec=python3 "${SCRIPT_DIR}/gui.py"
+Exec=python3 "${SCRIPT_DIR}/src/gui.py"
 Icon=dictate
 Terminal=false
 Categories=Utility;Accessibility;
@@ -69,6 +69,6 @@ echo "Dictate ${VERSION} installed."
 echo
 echo "Launch:"
 echo "  - From app menu: 'Dictate'"
-echo "  - From shell:    python3 ${SCRIPT_DIR}/gui.py"
+echo "  - From shell:    python3 ${SCRIPT_DIR}/src/gui.py"
 echo
 echo "On first launch: open Settings and click 'Download model' (~640 MB, one-time)."

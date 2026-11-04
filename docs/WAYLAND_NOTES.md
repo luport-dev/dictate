@@ -22,7 +22,7 @@ The user had been running an Xorg session before an NVIDIA driver upgrade. Look 
 
 Between 00:13 and 01:16 there was **no Xorg NVIDIA module installed**. Any GDM restart in that window would have detected "no Xorg driver → default to Wayland" and stored that as the user's session preference. The user did not notice the flip.
 
-**Fix:** read `/dev/input/event*` directly via `python-evdev`. See `evdev_listener.py` — it exposes the same `on_press`/`on_release` shape as `pynput.keyboard.Listener` so `gui.py` can swap in one line. Requires membership in group `input`.
+**Fix:** read `/dev/input/event*` directly via `python-evdev`. See `src/evdev_listener.py` — it exposes the same `on_press`/`on_release` shape as `pynput.keyboard.Listener` so `gui.py` can swap in one line. Requires membership in group `input`.
 
 ## Bug 2 — xdotool cannot type into native Wayland windows
 
@@ -83,7 +83,7 @@ Linger=yes
 
 With linger on, `user@1000.service` (the systemd --user manager, and everything it spawns — `gnome-terminal-server`, `mutter`, ...) keeps running past logout. On next login GDM re-attaches to the existing user-manager, so freshly launched processes inherit the old process credentials.
 
-**Fix:** `loginctl disable-linger $USER` followed by logout / login, or just reboot. Alternatively `sg input -c 'python3 gui.py'` runs the command with the correct primary group without needing a session restart.
+**Fix:** `loginctl disable-linger $USER` followed by logout / login, or just reboot. Alternatively `sg input -c 'python3 src/gui.py'` runs the command with the correct primary group without needing a session restart.
 
 ## Diagnosis order for future breakage
 
@@ -108,7 +108,7 @@ ydotool type "typed by ydotool"
 # should appear in whatever window has focus
 
 # 5. Is Dictate using evdev?
-grep -q "keyboard listener: evdev" <(python3 ~/dictate/gui.py 2>&1)
+grep -q "keyboard listener: evdev" <(python3 ~/dictate/src/gui.py 2>&1)
 ```
 
 If all five pass and Dictate still misbehaves, something newer than 2026-08-02 broke it — grep this file for the debug prints (`[dbg]`) shown above and re-add them to see where the pipeline stops.

@@ -49,7 +49,7 @@ Seit Version 0.2.3 schreibt Dictate keine Informationszeilen mehr ins Log. Sie w
 - Wird nur ausgelöst, wenn der Nutzer in den Einstellungen auf „Download model“ klickt oder den Erststart-Dialog bestätigt.
 - Quelle: HuggingFace-Repository `flozen1981/parakeet-primeline-onnx`, festgelegte Revision `d548e25b9bfe559aa274f361892dc4ed5d64743a`.
 - Dabei erfährt HuggingFace (bzw. dessen CDN) die **IP-Adresse** und technische Verbindungsdaten des Rechners. **Diktatdaten werden nicht übertragen.**
-- Die anonyme Nutzungsstatistik der Bibliothek `huggingface_hub` ist abgeschaltet (`HF_HUB_DISABLE_TELEMETRY=1`, gesetzt am Anfang von `core.py`, bevor die Bibliothek geladen wird).
+- Die anonyme Nutzungsstatistik der Bibliothek `huggingface_hub` ist abgeschaltet (`HF_HUB_DISABLE_TELEMETRY=1`, gesetzt am Anfang von `src/core.py`, bevor die Bibliothek geladen wird).
 - Danach läuft Dictate ohne Netzwerk. Alternativ kann das Modell vorab in das Modellverzeichnis kopiert werden, dann ist kein Download nötig. Ein Windows-Installer mit eingebautem Modell ist als spätere Option vorgesehen und würde den Download ganz entfallen lassen.
 
 ### 3.2 Alle anderen Funktionen
@@ -90,7 +90,7 @@ Dictate wertet nur aus, ob der konfigurierte Hotkey gedrückt oder losgelassen w
 
 Unter Linux/Wayland öffnet der Listener nur Tastaturen sowie Mäuse mit Seitentasten und liest deren Tastenereignisse passiv, ohne sie zu verändern oder abzufangen (`evdev_listener.py`). Die virtuelle Tastatur von `ydotool` wird absichtlich ausgelassen.
 
-Für den Betriebsrat ist dennoch relevant, dass technisch ein systemweiter Listener läuft. Dass er nichts aufzeichnet, ergibt sich aus dem Quellcode (`gui.py`, `evdev_listener.py`) und lässt sich dort prüfen.
+Für den Betriebsrat ist dennoch relevant, dass technisch ein systemweiter Listener läuft. Dass er nichts aufzeichnet, ergibt sich aus dem Quellcode (`src/gui.py`, `src/evdev_listener.py`) und lässt sich dort prüfen.
 
 ## 5. Datensparsamkeit und Technik
 

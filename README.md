@@ -4,7 +4,7 @@ Voice dictation to keyboard on Linux and Windows — fully offline (Parakeet, Ge
 
 Current version: **0.2.3** — the main window is gone; the tray icon (left or right click)
 opens a menu with **Settings**, **Restart** and **Quit**. The version is shown in the
-Settings dialog and the tray tooltip; `python3 version.py` prints it from the shell.
+Settings dialog and the tray tooltip; `python3 src/version.py` prints it from the shell.
 
 Hold a hotkey, speak, release — the transcribed text is typed wherever your cursor is. Works in any application (X11 and native Wayland alike), including editors, terminals, browsers, chat windows.
 
@@ -43,7 +43,7 @@ The installer adds:
 
 The Parakeet ONNX model itself (~640 MB) is *not* downloaded by `install.sh` — the download is triggered from Settings (or the first-run prompt).
 
-If the installer added you to the `input` group you must log out and back in for it to take effect (or reboot — see WAYLAND_NOTES.md for the `systemd-linger` gotcha that can defeat a plain logout).
+If the installer added you to the `input` group you must log out and back in for it to take effect (or reboot — see docs/WAYLAND_NOTES.md for the `systemd-linger` gotcha that can defeat a plain logout).
 
 ## Windows
 
@@ -65,7 +65,7 @@ Differences from Linux:
 
 ## First run
 
-Launch **Dictate** from the app menu (or `python3 gui.py`). On first launch Settings opens so you can download the model.
+Launch **Dictate** from the app menu (or `python3 src/gui.py`). On first launch Settings opens so you can download the model.
 
 ## Usage
 
@@ -92,7 +92,7 @@ Attribution (CC-BY-4.0): [primeline](https://huggingface.co/flozen1981/parakeet-
 
 ## Privacy
 
-Full details for data protection officers (German): [DATENSCHUTZ.md](DATENSCHUTZ.md).
+Full details for data protection officers (German): [DATENSCHUTZ.md](docs/DATENSCHUTZ.md).
 
 - **No audio or text is stored.** Recordings live in memory only and are discarded after transcription; the transcribed text is typed at the cursor and kept nowhere.
 - **No network use during dictation.** Recognition runs locally on the CPU. The only network access is the optional one-time model download from HuggingFace (which sees your IP address, not your dictation); `huggingface_hub` usage telemetry is disabled (`HF_HUB_DISABLE_TELEMETRY=1`).
@@ -140,7 +140,7 @@ This uses the terminal's text-paste shortcut instead.
 
 - Should not happen since the audio-stop + transcribe pipeline runs in a worker thread. If it does, check the launcher stderr for exceptions
 
-See `WAYLAND_NOTES.md` for the longer story of the four combined bugs that had to be untangled to make this work on GNOME Wayland with NVIDIA.
+See [docs/WAYLAND_NOTES.md](docs/WAYLAND_NOTES.md) for the longer story of the four combined bugs that had to be untangled to make this work on GNOME Wayland with NVIDIA.
 
 ## Configuration file
 
